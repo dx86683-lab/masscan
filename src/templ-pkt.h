@@ -77,6 +77,7 @@ struct TemplatePacket {
 struct TemplateSet
 {
     unsigned count;
+    unsigned is_udp_probe_experimental:1;
     struct MassVulnCheck *vulncheck;
     uint64_t entropy;
     struct TemplatePacket pkts[Proto_Count];

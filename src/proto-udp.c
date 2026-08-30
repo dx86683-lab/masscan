@@ -1,4 +1,5 @@
 #include "proto-udp.h"
+#include "proto-udp-probe.h"
 #include "proto-coap.h"
 #include "proto-dns.h"
 #include "proto-isakmp.h"
@@ -14,6 +15,7 @@
 #include "masscan-status.h"
 #include "unusedparm.h"
 #include "masscan.h"
+#include "massip-port.h"
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
@@ -64,6 +66,7 @@ handle_udp(struct Output *out, time_t timestamp,
     unsigned port_them = parsed->port_src;
     unsigned status = 0;
     unsigned is_raw = 0;
+    enum ApplicationProtocol probe_protocol = PROTO_NONE;
 
     /* Report "open" status regardless  */
     output_report_status(
@@ -78,7 +81,21 @@ handle_udp(struct Output *out, time_t timestamp,
                              parsed->mac_src);
 
 
-    switch (port_them) {
+    if (out->masscan != NULL && out->masscan->is_udp_probe_experimental) {
+        uint64_t cookie = syn_cookie(ip_them, port_them | Templ_UDP,
+                                     parsed->dst_ip, parsed->port_dst,
+                                     entropy);
+        probe_protocol = udp_probe_classify(port_them,
+                                            px + parsed->app_offset,
+                                            parsed->app_length, cookie);
+    }
+
+    if (probe_protocol != PROTO_NONE) {
+        output_report_banner(out, timestamp, ip_them, 17, port_them,
+                             probe_protocol, parsed->ip_ttl,
+                             px + parsed->app_offset, parsed->app_length);
+        status = 1;
+    } else switch (port_them) {
         case 53: /* DNS - Domain Name System (amplifier) */
             status = handle_dns(out, timestamp, px, length, parsed, entropy);
             break;
@@ -140,6 +157,7 @@ handle_udp(struct Output *out, time_t timestamp,
 struct UdpSelftestCapture {
     unsigned banner_count;
     unsigned banner_length;
+    enum ApplicationProtocol protocol;
     unsigned char banner[8];
 };
 
@@ -187,11 +205,11 @@ udp_selftest_banner(struct Output *out, FILE *fp, time_t timestamp,
     UNUSEDPARM(ip);
     UNUSEDPARM(ip_proto);
     UNUSEDPARM(port);
-    UNUSEDPARM(proto);
     UNUSEDPARM(ttl);
 
     udp_selftest_capture.banner_count++;
     udp_selftest_capture.banner_length = length;
+    udp_selftest_capture.protocol = proto;
     if (length > sizeof(udp_selftest_capture.banner))
         length = sizeof(udp_selftest_capture.banner);
     memcpy(udp_selftest_capture.banner, px, length);
@@ -216,6 +234,10 @@ proto_udp_selftest(void)
     static const unsigned char mac[6] = {0};
     struct PreprocessedInfo parsed;
     struct Output out;
+    struct Masscan masscan;
+    struct UdpPreparedProbe request;
+    unsigned char response[27];
+    uint64_t cookie;
     FILE *fp;
 
     memset(&parsed, 0, sizeof(parsed));
@@ -260,6 +282,41 @@ proto_udp_selftest(void)
     handle_udp(&out, 0, packet, sizeof(packet), &parsed, 0);
     fclose(fp);
     if (udp_selftest_capture.banner_count != 1)
+        return 1;
+
+    memset(&masscan, 0, sizeof(masscan));
+    masscan.is_udp_probe_experimental = 1;
+    out.masscan = &masscan;
+    out.is_banner_rawudp = 0;
+    parsed.port_src = 80;
+    parsed.port_dst = 40000;
+    parsed.dst_ip.version = 4;
+    parsed.dst_ip.ipv4 = 0x7f000002;
+    parsed.app_offset = 0;
+    parsed.app_length = sizeof(response);
+    cookie = syn_cookie(parsed.src_ip, parsed.port_src | Templ_UDP,
+                        parsed.dst_ip, parsed.port_dst, 7);
+    if (!udp_probe_prepare(80, cookie, &request))
+        return 1;
+    response[0] = 0xc0;
+    memset(response + 1, 0, 4);
+    response[5] = 8;
+    memcpy(response + 6, request.payload + 15, 8);
+    response[14] = 8;
+    memcpy(response + 15, request.payload + 6, 8);
+    response[23] = 0;
+    response[24] = 0;
+    response[25] = 0;
+    response[26] = 1;
+    memset(&udp_selftest_capture, 0, sizeof(udp_selftest_capture));
+    fp = tmpfile();
+    if (fp == NULL)
+        return 1;
+    out.fp = fp;
+    handle_udp(&out, 0, response, sizeof(response), &parsed, 7);
+    fclose(fp);
+    if (udp_selftest_capture.banner_count != 1 ||
+        udp_selftest_capture.protocol != PROTO_QUIC)
         return 1;
 
     return 0;

@@ -1129,6 +1129,30 @@ static int SET_banners_rawudp(struct Masscan *masscan, const char *name, const c
     return CONF_OK;
 }
 
+static int
+SET_udp_probe_profile(struct Masscan *masscan, const char *name,
+                      const char *value)
+{
+    UNUSEDPARM(name);
+    if (masscan->echo) {
+        if (masscan->is_udp_probe_experimental || masscan->echo_all)
+            fprintf(masscan->echo, "udp-probe-profile = %s\n",
+                    masscan->is_udp_probe_experimental ? "experimental" : "default");
+        return CONF_OK;
+    }
+    if (EQUALS("experimental", value)) {
+        masscan->is_udp_probe_experimental = 1;
+        masscan->is_banners = 1;
+        return CONF_OK;
+    }
+    if (EQUALS("default", value)) {
+        masscan->is_udp_probe_experimental = 0;
+        return CONF_OK;
+    }
+    fprintf(stderr, "FAIL: unknown UDP probe profile: %s\n", value);
+    return CONF_ERR;
+}
+
 static int SET_capture(struct Masscan *masscan, const char *name, const char *value)
 {
     if (masscan->echo) {
@@ -2378,6 +2402,7 @@ struct ConfigParameter config_parameters[] = {
     {"rawudp",          SET_banners_rawudp,     F_BOOL, {"rawudp",0}}, /* --rawudp */
     {"nobanners",       SET_nobanners,          F_BOOL, {"nobanner",0}},
     {"retries",         SET_retries,            0,      {"retry", "max-retries", "max-retry", 0}},
+    {"udp-probe-profile", SET_udp_probe_profile, 0,     {0}},
     {"noreset",         SET_noreset,            F_BOOL, {0}},
     {"nmap-payloads",   SET_nmap_payloads,      0,      {"nmap-payload",0}},
     {"nmap-service-probes",SET_nmap_service_probes, 0,  {"nmap-service-probe",0}},
@@ -3970,4 +3995,3 @@ failure:
     fprintf(stderr, "[+] selftest failure: config subsystem\n");
     return 1;
 }
-

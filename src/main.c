@@ -1309,6 +1309,8 @@ main_scan(struct Masscan *masscan)
                     stack_if_datalink(masscan->nic[index].adapter),
                     masscan->seed,
                     masscan->templ_opts);
+        parms->tmplset->is_udp_probe_experimental =
+            masscan->is_udp_probe_experimental;
 
         /*
          * Set the "source port" of everything we transmit.

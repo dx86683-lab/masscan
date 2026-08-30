@@ -42,6 +42,8 @@ enum ApplicationProtocol {
     PROTO_VNC_RFB,
     PROTO_VNC_INFO,
     PROTO_ISAKMP,           /* 35 - IPsec key exchange */
+    PROTO_QUIC,
+    PROTO_BITTORRENT,
     
     PROTO_ERROR,
 
