@@ -58,6 +58,7 @@
 #include "proto-preprocess.h"   /* quick parse of packets */
 #include "proto-icmp.h"         /* handle ICMP responses */
 #include "proto-udp.h"          /* handle UDP responses */
+#include "proto-udp-probe.h"
 #include "proto-snmp.h"         /* parse SNMP responses */
 #include "proto-ntp.h"          /* parse NTP responses */
 #include "proto-coap.h"         /* CoAP selftest */
@@ -1835,6 +1836,7 @@ int main(int argc, char *argv[])
             x += snmp_selftest();
             x += proto_isakmp_selftest();
             x += proto_udp_selftest();
+            x += udp_probe_catalog_selftest();
             x += templ_payloads_selftest();
             x += blackrock_selftest();
             x += rawsock_selftest();
@@ -1867,4 +1869,3 @@ int main(int argc, char *argv[])
 
     return 0;
 }
-
