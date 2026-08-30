@@ -13,6 +13,10 @@
 #include "output.h"
 #include "masscan-status.h"
 #include "unusedparm.h"
+#include "masscan.h"
+#include <limits.h>
+#include <stdio.h>
+#include <string.h>
 
 
 /****************************************************************************
@@ -46,7 +50,7 @@ default_udp_parse(struct Output *out, time_t timestamp,
                          parsed->ip_ttl,
                          px, length);
 
-    return 0;
+    return 1;
 }
 
 /****************************************************************************
@@ -59,6 +63,7 @@ handle_udp(struct Output *out, time_t timestamp,
     ipaddress ip_them = parsed->src_ip;
     unsigned port_them = parsed->port_src;
     unsigned status = 0;
+    unsigned is_raw = 0;
 
     /* Report "open" status regardless  */
     output_report_status(
@@ -109,6 +114,7 @@ handle_udp(struct Output *out, time_t timestamp,
             px += parsed->app_offset;
             length = parsed->app_length;
             status = default_udp_parse(out, timestamp, px, length, parsed, entropy);
+            is_raw = 1;
             break;
     }
 
@@ -117,7 +123,7 @@ handle_udp(struct Output *out, time_t timestamp,
      * Also report raw dump if `--rawudp` specified on the
      * command-line, even if a protocol above already created a more detailed
      * banner. */
-    if (status == 0 || out->is_banner_rawudp) {
+    if (status == 0 || (out->is_banner_rawudp && !is_raw)) {
             output_report_banner(
                     out,
                     timestamp,
@@ -129,4 +135,132 @@ handle_udp(struct Output *out, time_t timestamp,
                     px + parsed->app_offset,
                     parsed->app_length);
     }
+}
+
+struct UdpSelftestCapture {
+    unsigned banner_count;
+    unsigned banner_length;
+    unsigned char banner[8];
+};
+
+static struct UdpSelftestCapture udp_selftest_capture;
+
+static void
+udp_selftest_open(struct Output *out, FILE *fp)
+{
+    UNUSEDPARM(out);
+    UNUSEDPARM(fp);
+}
+
+static void
+udp_selftest_close(struct Output *out, FILE *fp)
+{
+    UNUSEDPARM(out);
+    UNUSEDPARM(fp);
+}
+
+static void
+udp_selftest_status(struct Output *out, FILE *fp, time_t timestamp,
+                    int status, ipaddress ip, unsigned ip_proto,
+                    unsigned port, unsigned reason, unsigned ttl)
+{
+    UNUSEDPARM(out);
+    UNUSEDPARM(fp);
+    UNUSEDPARM(timestamp);
+    UNUSEDPARM(status);
+    UNUSEDPARM(ip);
+    UNUSEDPARM(ip_proto);
+    UNUSEDPARM(port);
+    UNUSEDPARM(reason);
+    UNUSEDPARM(ttl);
+}
+
+static void
+udp_selftest_banner(struct Output *out, FILE *fp, time_t timestamp,
+                    ipaddress ip, unsigned ip_proto, unsigned port,
+                    enum ApplicationProtocol proto, unsigned ttl,
+                    const unsigned char *px, unsigned length)
+{
+    UNUSEDPARM(out);
+    UNUSEDPARM(fp);
+    UNUSEDPARM(timestamp);
+    UNUSEDPARM(ip);
+    UNUSEDPARM(ip_proto);
+    UNUSEDPARM(port);
+    UNUSEDPARM(proto);
+    UNUSEDPARM(ttl);
+
+    udp_selftest_capture.banner_count++;
+    udp_selftest_capture.banner_length = length;
+    if (length > sizeof(udp_selftest_capture.banner))
+        length = sizeof(udp_selftest_capture.banner);
+    memcpy(udp_selftest_capture.banner, px, length);
+}
+
+static const struct OutputType udp_selftest_output = {
+    "selftest",
+    0,
+    udp_selftest_open,
+    udp_selftest_close,
+    udp_selftest_status,
+    udp_selftest_banner
+};
+
+int
+proto_udp_selftest(void)
+{
+    static const unsigned char packet[] = {
+        0xaa, 0xbb, 0xcc, 0x10, 0x20, 0x30, 0x40, 0x50
+    };
+    static const unsigned char expected[] = {0x10, 0x20, 0x30};
+    static const unsigned char mac[6] = {0};
+    struct PreprocessedInfo parsed;
+    struct Output out;
+    FILE *fp;
+
+    memset(&parsed, 0, sizeof(parsed));
+    memset(&out, 0, sizeof(out));
+    memset(&udp_selftest_capture, 0, sizeof(udp_selftest_capture));
+
+    fp = tmpfile();
+    if (fp == NULL)
+        return 1;
+
+    parsed.src_ip.version = 4;
+    parsed.src_ip.ipv4 = 0x7f000001;
+    parsed.port_src = 65000;
+    parsed.app_offset = 3;
+    parsed.app_length = sizeof(expected);
+    parsed.ip_ttl = 64;
+    parsed.mac_src = mac;
+
+    out.fp = fp;
+    out.funcs = &udp_selftest_output;
+    out.format = Output_None;
+    out.is_banner = 1;
+    out.is_show_open = 1;
+    out.rotate.next = LONG_MAX;
+
+    handle_udp(&out, 0, packet, sizeof(packet), &parsed, 0);
+    fclose(fp);
+
+    if (udp_selftest_capture.banner_count != 1)
+        return 1;
+    if (udp_selftest_capture.banner_length != sizeof(expected))
+        return 1;
+    if (memcmp(udp_selftest_capture.banner, expected, sizeof(expected)) != 0)
+        return 1;
+
+    memset(&udp_selftest_capture, 0, sizeof(udp_selftest_capture));
+    out.is_banner_rawudp = 1;
+    fp = tmpfile();
+    if (fp == NULL)
+        return 1;
+    out.fp = fp;
+    handle_udp(&out, 0, packet, sizeof(packet), &parsed, 0);
+    fclose(fp);
+    if (udp_selftest_capture.banner_count != 1)
+        return 1;
+
+    return 0;
 }

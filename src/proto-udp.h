@@ -27,5 +27,8 @@ default_udp_parse(struct Output *out, time_t timestamp,
                   struct PreprocessedInfo *parsed,
                   uint64_t entropy);
 
+int
+proto_udp_selftest(void);
+
 
 #endif

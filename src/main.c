@@ -1834,6 +1834,7 @@ int main(int argc, char *argv[])
             x += ntp_selftest();
             x += snmp_selftest();
             x += proto_isakmp_selftest();
+            x += proto_udp_selftest();
             x += templ_payloads_selftest();
             x += blackrock_selftest();
             x += rawsock_selftest();
@@ -1866,5 +1867,4 @@ int main(int argc, char *argv[])
 
     return 0;
 }
-
 
