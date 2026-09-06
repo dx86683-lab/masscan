@@ -97,6 +97,7 @@ enum ApplicationProtocol {
     PROTO_VENTRILO,
     PROTO_SERIALNUMBERD,
     PROTO_HIKVISION,
+    PROTO_FINS,
 
     PROTO_end_of_list /* must be last one */
 };

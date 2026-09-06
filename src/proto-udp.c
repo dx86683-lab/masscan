@@ -1,6 +1,7 @@
 #include "proto-udp.h"
 #include "proto-udp-probe.h"
 #include "proto-udp-runtime.h"
+#include "proto-udp-fins.h"
 #include "proto-coap.h"
 #include "proto-dns.h"
 #include "proto-isakmp.h"
@@ -129,7 +130,7 @@ handle_udp(struct Output *out, time_t timestamp,
             probe_protocol == PROTO_HIFLY || probe_protocol == PROTO_HID ||
             probe_protocol == PROTO_GARDASOFT || probe_protocol == PROTO_GARDASOFT_VERSION ||
             probe_protocol == PROTO_VENTRILO || probe_protocol == PROTO_SERIALNUMBERD ||
-            probe_protocol == PROTO_HIKVISION) {
+            probe_protocol == PROTO_HIKVISION || probe_protocol == PROTO_FINS) {
             banner_data = (const unsigned char *)"discovery-response";
             banner_length = 18;
         }
@@ -541,6 +542,29 @@ proto_udp_selftest(void)
             if (udp_selftest_capture.protocol != fixtures[f].protocol ||
                 udp_selftest_capture.banner_count != 1 || udp_selftest_capture.banner_length != 18) return 1;
         }
+    }
+    {
+        unsigned char model_reply[106] = {0};
+        unsigned variant;
+        fins_probe_configure(2, 1);
+        parsed.port_src = 9600; parsed.app_length = sizeof(model_reply);
+        cookie = syn_cookie(parsed.src_ip, 9600 | Templ_UDP, parsed.dst_ip, parsed.port_dst, 7);
+        memcpy(model_reply, "\xc0\x00\x02\x00\x02\x00\x00\x01\x00\x00\x05\x01\x00\x00", 14);
+        model_reply[9] = (unsigned char)cookie;
+        memcpy(model_reply + 14, "CJ2M-CPU32", 10); memcpy(model_reply + 34, "02.01", 5);
+        for (variant = 0; variant < 2; variant++) {
+            if (variant) model_reply[9] ^= 1;
+            memset(&udp_selftest_capture, 0, sizeof(udp_selftest_capture));
+            fp = tmpfile();
+            if (!fp) return 1;
+            out.fp = fp;
+            handle_udp(&out, 0, model_reply, sizeof(model_reply), &parsed, 7);
+            fclose(fp);
+            if (!variant && (udp_selftest_capture.protocol != PROTO_FINS ||
+                udp_selftest_capture.banner_count != 1 || udp_selftest_capture.banner_length != 18)) return 1;
+            if (variant && udp_selftest_capture.protocol == PROTO_FINS) return 1;
+        }
+        fins_probe_configure(0, 0);
     }
 #ifdef UDP_EXTENDED_PROBES
     parsed.port_src = 1194;

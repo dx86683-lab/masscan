@@ -27,6 +27,7 @@
 #include "proto-udp-structured-discovery.h"
 #include "proto-udp-ventrilo.h"
 #include "proto-udp-text-discovery.h"
+#include "proto-udp-fins.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -891,6 +892,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {30313, PROTO_GARDASOFT_VERSION, gardasoft_version_probe_prepare, gardasoft_version_probe_classify},
     {3784, PROTO_VENTRILO, ventrilo_probe_prepare, ventrilo_probe_classify},
     {626, PROTO_SERIALNUMBERD, serialnumberd_probe_prepare, serialnumberd_probe_classify},
+    {9600, PROTO_FINS, fins_probe_prepare, fins_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {37020, PROTO_HIKVISION, hikvision_probe_prepare, hikvision_probe_classify},
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
@@ -1033,6 +1035,36 @@ udp_probe_catalog_selftest(void)
 {
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
+    {
+        unsigned char reply[107] = {0}, changed[107];
+        unsigned n;
+        fins_probe_configure(0, 0);
+        if (udp_probe_prepare(9600, 0x7b, NULL, &result)) return 1;
+        if (fins_probe_configure(0, 1) || fins_probe_configure(255, 1) || !fins_probe_configure(2, 1)) return 1;
+        memcpy(reply, "\xc0\x00\x02\x00\x02\x00\x00\x01\x00\x7b\x05\x01\x00\x00", 14);
+        memset(reply + 14, ' ', 20); memcpy(reply + 14, "CJ2M-CPU32", 10);
+        memcpy(reply + 34, "02.01", 5);
+        memcpy(reply + 94, "\x00\x14\x17\x80\x00\x08\x01\x00\x00\x00\x00\x00", 12);
+        if (udp_probe_classify(9600, reply, 106, 0x7b) != PROTO_FINS) {
+            fprintf(stderr, "fins: configured model reply rejected\n"); return 1;
+        }
+        if (!udp_probe_prepare(9600, 0x7b, NULL, &result) || result.length != 13 ||
+            memcmp(result.payload, "\x80\x00\x02\x00\x01\x00\x00\x02\x00\x7b\x05\x01\x00", 13)) return 1;
+        for (n = 0; n < 106; n++)
+            if (udp_probe_classify(9600, reply, n, 0x7b) != PROTO_NONE) return 1;
+        for (n = 0; n < 14; n++) {
+            memcpy(changed, reply, 106); changed[n] ^= 1;
+            if (udp_probe_classify(9600, changed, 106, 0x7b) != PROTO_NONE) return 1;
+        }
+        if (udp_probe_classify(9600, reply, 107, 0x7b) != PROTO_NONE ||
+            udp_probe_classify(9600, reply, 106, 0x7a) != PROTO_NONE) return 1;
+        memcpy(changed, reply, 106); changed[17] = 0;
+        if (udp_probe_classify(9600, changed, 106, 0x7b) != PROTO_NONE) return 1;
+        memset(changed + 14, ' ', 20);
+        if (udp_probe_classify(9600, changed, 106, 0x7b) != PROTO_NONE) return 1;
+        fins_probe_configure(0, 0);
+        if (udp_probe_classify(9600, reply, 106, 0x7b) != PROTO_NONE) return 1;
+    }
     {
         static const unsigned char reply[] = "SNRESPS:lab:0x1111111111111111111111111111111111111111:xsvr:"
             "0x2222222222222222222222222222222222222222:0x1234abcd:"

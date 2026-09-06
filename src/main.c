@@ -17,6 +17,7 @@
 */
 #include "masscan.h"
 #include "proto-udp-runtime.h"
+#include "proto-udp-fins.h"
 #include "masscan-version.h"
 #include "masscan-status.h"     /* open or closed */
 #include "massip-parse.h"
@@ -1690,6 +1691,13 @@ int main(int argc, char *argv[])
      * our --excludefile will chop up our pristine 0.0.0.0/0 range into
      * hundreds of subranges. This allows us to grab addresses faster. */
     massip_optimize(&masscan->targets);
+
+    if (!fins_probe_configure(masscan->udp_fins_source_node, masscan->udp_fins_destination_node)) return 1;
+    if (masscan->is_udp_probe_experimental && massip_has_port(&masscan->targets, 9600 | Templ_UDP) &&
+        (!masscan->udp_fins_source_node || !masscan->udp_fins_destination_node)) {
+        fprintf(stderr, "FINS discovery requires --udp-fins-route source-node,destination-node (1-254)\n");
+        return 1;
+    }
 
     if (masscan->is_udp_probe_experimental && udp_probe_is_registered(69) &&
         massip_has_port(&masscan->targets, 69 | Templ_UDP) && masscan->targets.count_ports != 1) {

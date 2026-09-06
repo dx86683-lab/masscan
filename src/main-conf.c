@@ -1153,6 +1153,39 @@ SET_udp_probe_profile(struct Masscan *masscan, const char *name,
     return CONF_ERR;
 }
 
+static int
+SET_udp_fins_route(struct Masscan *masscan, const char *name, const char *value)
+{
+    unsigned nodes[2] = {0}, i;
+    const char *p = value;
+    UNUSEDPARM(name);
+    if (masscan->echo) {
+        if (masscan->udp_fins_source_node)
+            fprintf(masscan->echo, "udp-fins-route = %u,%u\n", masscan->udp_fins_source_node, masscan->udp_fins_destination_node);
+        else if (masscan->echo_all) fprintf(masscan->echo, "udp-fins-route = disabled\n");
+        return CONF_OK;
+    }
+    if (EQUALS("disabled", value)) {
+        masscan->udp_fins_source_node = masscan->udp_fins_destination_node = 0;
+        return CONF_OK;
+    }
+    for (i = 0; i < 2; i++) {
+        unsigned digits = 0;
+        while (*p >= '0' && *p <= '9') {
+            if (++digits > 3) goto invalid_fins_route;
+            nodes[i] = nodes[i] * 10 + (unsigned)(*p++ - '0');
+        }
+        if (!nodes[i] || nodes[i] > 254) goto invalid_fins_route;
+        if (i == 0 && *p++ != ',') goto invalid_fins_route;
+    }
+    if (*p) goto invalid_fins_route;
+    masscan->udp_fins_source_node = nodes[0]; masscan->udp_fins_destination_node = nodes[1];
+    return CONF_OK;
+invalid_fins_route:
+    fprintf(stderr, "FAIL: udp-fins-route requires two node numbers in 1-254 separated by a comma\n");
+    exit(1);
+}
+
 static int SET_capture(struct Masscan *masscan, const char *name, const char *value)
 {
     if (masscan->echo) {
@@ -2403,6 +2436,7 @@ struct ConfigParameter config_parameters[] = {
     {"nobanners",       SET_nobanners,          F_BOOL, {"nobanner",0}},
     {"retries",         SET_retries,            0,      {"retry", "max-retries", "max-retry", 0}},
     {"udp-probe-profile", SET_udp_probe_profile, 0,     {0}},
+    {"udp-fins-route", SET_udp_fins_route, 0,           {0}},
     {"noreset",         SET_noreset,            F_BOOL, {0}},
     {"nmap-payloads",   SET_nmap_payloads,      0,      {"nmap-payload",0}},
     {"nmap-service-probes",SET_nmap_service_probes, 0,  {"nmap-service-probe",0}},
