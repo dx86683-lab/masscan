@@ -50,6 +50,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_QUIC:            return "quic";
     case PROTO_BITTORRENT:       return "bittorrent";
     case PROTO_MUMBLE:           return "mumble";
+    case PROTO_MGCP:             return "mgcp";
         
     case PROTO_ERROR:           return "error";
             
@@ -106,6 +107,7 @@ masscan_string_to_app(const char *str)
         {"quic",        PROTO_QUIC},
         {"bittorrent",  PROTO_BITTORRENT},
         {"mumble",      PROTO_MUMBLE},
+        {"mgcp",        PROTO_MGCP},
         {0,0}
     };
     size_t i;
@@ -130,6 +132,7 @@ masscan_app_selftest(void) {
         {PROTO_BITTORRENT, 37},
         {PROTO_ERROR, 38},
         {PROTO_MUMBLE, 39},
+        {PROTO_MGCP, 40},
         {0,0}
     };
     size_t i;
@@ -153,6 +156,9 @@ masscan_app_selftest(void) {
     
     if (masscan_string_to_app("mumble") != PROTO_MUMBLE ||
         strcmp(masscan_app_to_string(PROTO_MUMBLE), "mumble") != 0)
+        return 1;
+    if (masscan_string_to_app("mgcp") != PROTO_MGCP ||
+        strcmp(masscan_app_to_string(PROTO_MGCP), "mgcp") != 0)
         return 1;
     return 0;
 }

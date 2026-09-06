@@ -1,7 +1,9 @@
 #include "proto-udp-probe.h"
 #include <string.h>
+#include "util-safefunc.h"
 
 typedef int (*UDP_PROBE_PREPARE)(uint64_t cookie,
+                                 const struct UdpProbeTarget *target,
                                  struct UdpPreparedProbe *result);
 typedef int (*UDP_PROBE_CLASSIFY)(const unsigned char *response,
                                   unsigned response_length,
@@ -33,8 +35,10 @@ write_u32_be(unsigned char *dst, uint32_t value)
 }
 
 static int
-quic_prepare(uint64_t cookie, struct UdpPreparedProbe *result)
+quic_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+             struct UdpPreparedProbe *result)
 {
+    (void)target;
     cookie = (uint32_t)cookie;
     memset(result->payload, 0, sizeof(result->payload));
     result->payload[0] = 0xc0;
@@ -96,12 +100,14 @@ quic_classify(const unsigned char *response, unsigned response_length,
 }
 
 static int
-bittorrent_prepare(uint64_t cookie, struct UdpPreparedProbe *result)
+bittorrent_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+                   struct UdpPreparedProbe *result)
 {
     static const unsigned char protocol_id[8] = {
         0x00, 0x00, 0x04, 0x17, 0x27, 0x10, 0x19, 0x80
     };
 
+    (void)target;
     memcpy(result->payload, protocol_id, sizeof(protocol_id));
     memset(result->payload + 8, 0, 4);
     write_u32_be(result->payload + 12, (uint32_t)cookie);
@@ -126,8 +132,10 @@ bittorrent_classify(const unsigned char *response, unsigned response_length,
 }
 
 static int
-mumble_prepare(uint64_t cookie, struct UdpPreparedProbe *result)
+mumble_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+                struct UdpPreparedProbe *result)
 {
+    (void)target;
     memset(result->payload, 0, 4);
     write_u64_be(result->payload + 4, (uint32_t)cookie);
     result->length = 12;
@@ -150,15 +158,84 @@ mumble_classify(const unsigned char *response, unsigned response_length,
     return memcmp(response + 4, expected, sizeof(expected)) == 0;
 }
 
+static unsigned
+mgcp_transaction(uint64_t cookie)
+{
+    return (uint32_t)cookie % 999999999U + 1;
+}
+
+static int
+mgcp_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+              struct UdpPreparedProbe *result)
+{
+    struct ipaddress_formatted address;
+    int length;
+
+    if (target == NULL || (target->destination.version != 4 &&
+                           target->destination.version != 6))
+        return 0;
+    address = ipaddress_fmt(target->destination);
+    length = snprintf((char *)result->payload, sizeof(result->payload),
+                      "AUEP %u *@[%s] MGCP 1.0\r\n",
+                      mgcp_transaction(cookie), address.string);
+    if (length < 0 || (unsigned)length >= sizeof(result->payload))
+        return 0;
+    result->length = (unsigned)length;
+    return 1;
+}
+
+static int
+mgcp_classify(const unsigned char *response, unsigned response_length,
+               uint64_t cookie)
+{
+    unsigned offset = 3;
+    unsigned transaction = 0;
+    unsigned digits = 0;
+
+    if (response_length < 6 || response[0] < '1' || response[0] > '5' ||
+        response[1] < '0' || response[1] > '9' ||
+        response[2] < '0' || response[2] > '9' ||
+        (response[offset] != ' ' && response[offset] != '\t') ||
+        response[response_length - 1] != '\n')
+        return 0;
+    if (memchr(response, 0, response_length) != NULL)
+        return 0;
+    while (offset < response_length &&
+           (response[offset] == ' ' || response[offset] == '\t'))
+        offset++;
+    while (offset < response_length && response[offset] >= '0' &&
+           response[offset] <= '9') {
+        if (++digits > 9)
+            return 0;
+        transaction = transaction * 10 + response[offset++] - '0';
+    }
+    if (digits == 0 || transaction != mgcp_transaction(cookie) ||
+        offset == response_length)
+        return 0;
+    if (response[offset] != ' ' && response[offset] != '\t' &&
+        response[offset] != '\r' && response[offset] != '\n')
+        return 0;
+    /* Require a complete first response line, including any CRLF pair. */
+    while (offset < response_length && response[offset] != '\n') {
+        if (response[offset] == '\r' &&
+            (offset + 1 == response_length || response[offset + 1] != '\n'))
+            return 0;
+        offset++;
+    }
+    return offset < response_length;
+}
+
 static const struct UdpProbeSpec udp_probe_catalog[] = {
     {80, PROTO_QUIC, quic_prepare, quic_classify},
     {6969, PROTO_BITTORRENT, bittorrent_prepare, bittorrent_classify},
     {64738, PROTO_MUMBLE, mumble_prepare, mumble_classify},
+    {2427, PROTO_MGCP, mgcp_prepare, mgcp_classify},
     {0, PROTO_NONE, 0, 0}
 };
 
 int
 udp_probe_prepare(unsigned port, uint64_t cookie,
+                  const struct UdpProbeTarget *target,
                   struct UdpPreparedProbe *result)
 {
     unsigned i;
@@ -171,7 +248,7 @@ udp_probe_prepare(unsigned port, uint64_t cookie,
         if (udp_probe_catalog[i].port != port)
             continue;
         result->port = port;
-        return udp_probe_catalog[i].prepare(cookie, result);
+        return udp_probe_catalog[i].prepare(cookie, target, result);
     }
 
     return 0;
@@ -226,7 +303,7 @@ udp_probe_catalog_selftest(void)
     };
     unsigned i;
 
-    if (!udp_probe_prepare(64738, cookie, &result) || result.length != 12)
+    if (!udp_probe_prepare(64738, cookie, NULL, &result) || result.length != 12)
         return 1;
     if (memcmp(result.payload,
                "\x00\x00\x00\x00\x00\x00\x00\x00\x89\xab\xcd\xef", 12))
@@ -259,19 +336,77 @@ udp_probe_catalog_selftest(void)
         udp_probe_classify(64738, NULL, 24, cookie) != PROTO_NONE)
         return 1;
 
+    if (udp_probe_classify(2427, (const unsigned char *)"200 309737970 OK\r\n",
+                           18, cookie) != PROTO_MGCP)
+        return 1;
+    {
+        static const struct {
+            const char *response;
+            uint64_t cookie;
+            int valid;
+        } tests[] = {
+            {"200 000000001 OK\r\n", 0, 1},
+            {"533 1 Response too large\n", 0, 1},
+            {"500 1 Unknown endpoint\r\n", 0, 1},
+            {"200 1 OK\r\nZ: a@[192.0.2.1]\r\n", 0, 1},
+            {"200 2 OK\r\n", 0, 0},
+            {"200 1suffix OK\r\n", 0, 0},
+            {"200 1000000000 OK\r\n", 0, 0},
+            {"200 0 OK\r\n", 0, 0},
+            {"600 1 invalid\r\n", 0, 0},
+            {"HTTP/1.1 200 OK\r\n", 0, 0},
+            {"200 1 bad\rtext\n", 0, 0},
+            {"200 1 OK\r", 0, 0},
+            {"200 1 OK", 0, 0},
+            {"200 1\r\n", 0, 1},
+            {"200\t1\tOK\n", 0, 1}
+        };
+        struct UdpProbeTarget target;
+        const char *expected = "AUEP 1 *@[192.0.2.1] MGCP 1.0\r\n";
+        memset(&target, 0, sizeof(target));
+        target.destination.version = 4;
+        target.destination.ipv4 = 0xc0000201;
+        if (!udp_probe_prepare(2427, 0, &target, &result) ||
+            result.length != strlen(expected) ||
+            memcmp(result.payload, expected, result.length) != 0)
+            return 1;
+        target.destination.version = 6;
+        target.destination.ipv6.hi = UINT64_C(0x20010db800000000);
+        target.destination.ipv6.lo = 1;
+        expected = "AUEP 1 *@[2001:db8::1] MGCP 1.0\r\n";
+        if (!udp_probe_prepare(2427, 0, &target, &result) ||
+            result.length != strlen(expected) ||
+            memcmp(result.payload, expected, result.length) != 0)
+            return 1;
+        if (udp_probe_prepare(2427, 0, NULL, &result))
+            return 1;
+        for (i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) {
+            int valid = udp_probe_classify(2427,
+                (const unsigned char *)tests[i].response,
+                (unsigned)strlen(tests[i].response), tests[i].cookie) == PROTO_MGCP;
+            if (valid != tests[i].valid)
+                return 1;
+        }
+        for (i = 0; i < 10; i++) {
+            if (udp_probe_classify(2427, (const unsigned char *)"200 1 OK\r\n",
+                                  i, 0) != PROTO_NONE)
+                return 1;
+        }
+    }
+
     memset(&result, 0xa5, sizeof(result));
-    if (udp_probe_prepare(65535, 0, &result) != 0)
+    if (udp_probe_prepare(65535, 0, NULL, &result) != 0)
         return 1;
     if (result.port != 0 || result.length != 0)
         return 1;
-    if (udp_probe_prepare(65535, 0, NULL) != 0)
+    if (udp_probe_prepare(65535, 0, NULL, NULL) != 0)
         return 1;
     if (udp_probe_classify(65535, NULL, 0, 0) != PROTO_NONE)
         return 1;
     if (udp_probe_classify(65535, NULL, 1, 0) != PROTO_NONE)
         return 1;
 
-    if (udp_probe_prepare(80, cookie, &result) == 0)
+    if (udp_probe_prepare(80, cookie, NULL, &result) == 0)
         return 1;
     if (result.port != 80 || result.length != 1200)
         return 1;
@@ -319,7 +454,7 @@ udp_probe_catalog_selftest(void)
     if (udp_probe_classify(80, invalid, sizeof(invalid), cookie) != PROTO_NONE)
         return 1;
 
-    if (udp_probe_prepare(6969, cookie, &result) == 0)
+    if (udp_probe_prepare(6969, cookie, NULL, &result) == 0)
         return 1;
     if (result.port != 6969 || result.length != 16 ||
         memcmp(result.payload,

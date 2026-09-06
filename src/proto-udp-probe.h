@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "masscan-app.h"
+#include "massip-addr.h"
 
 #define UDP_PROBE_MAX_PAYLOAD 1200
 
@@ -12,8 +13,15 @@ struct UdpPreparedProbe {
     unsigned char payload[UDP_PROBE_MAX_PAYLOAD];
 };
 
+struct UdpProbeTarget {
+    ipaddress source;
+    ipaddress destination;
+    unsigned source_port;
+};
+
 int
 udp_probe_prepare(unsigned port, uint64_t cookie,
+                  const struct UdpProbeTarget *target,
                   struct UdpPreparedProbe *result);
 
 enum ApplicationProtocol

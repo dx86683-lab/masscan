@@ -617,7 +617,8 @@ tcp_create_packet(
  ***************************************************************************/
 static void
 udp_payload_fixup(struct TemplateSet *tmplset, struct TemplatePacket *tmpl,
-                  unsigned port, unsigned seqno)
+                  unsigned port, unsigned seqno,
+                  const struct UdpProbeTarget *target)
 {
     const unsigned char *px2 = 0;
     unsigned length2 = 0;
@@ -627,7 +628,7 @@ udp_payload_fixup(struct TemplateSet *tmplset, struct TemplatePacket *tmpl,
     struct UdpPreparedProbe prepared;
 
     if (tmplset->is_udp_probe_experimental &&
-        udp_probe_prepare(port, seqno, &prepared)) {
+        udp_probe_prepare(port, seqno, target, &prepared)) {
         px2 = prepared.payload;
         length2 = prepared.length;
     } else {
@@ -693,7 +694,16 @@ template_set_target_ipv6(
     else if (port_them < Templ_UDP + 65536) {
         tmpl = &tmplset->pkts[Proto_UDP];
         port_them &= 0xFFFF;
-        udp_payload_fixup(tmplset, tmpl, port_them, seqno);
+        {
+            struct UdpProbeTarget target;
+            memset(&target, 0, sizeof(target));
+            target.source.version = 6;
+            target.source.ipv6 = ip_me;
+            target.destination.version = 6;
+            target.destination.ipv6 = ip_them;
+            target.source_port = port_me;
+            udp_payload_fixup(tmplset, tmpl, port_them, seqno, &target);
+        }
     } else if (port_them < Templ_SCTP + 65536) {
         tmpl = &tmplset->pkts[Proto_SCTP];
         port_them &= 0xFFFF;
@@ -909,7 +919,16 @@ template_set_target_ipv4(
     else if (port_them < Templ_UDP + 65536) {
         tmpl = &tmplset->pkts[Proto_UDP];
         port_them &= 0xFFFF;
-        udp_payload_fixup(tmplset, tmpl, port_them, seqno);
+        {
+            struct UdpProbeTarget target;
+            memset(&target, 0, sizeof(target));
+            target.source.version = 4;
+            target.source.ipv4 = ip_me;
+            target.destination.version = 4;
+            target.destination.ipv4 = ip_them;
+            target.source_port = port_me;
+            udp_payload_fixup(tmplset, tmpl, port_them, seqno, &target);
+        }
     } else if (port_them < Templ_SCTP + 65536) {
         tmpl = &tmplset->pkts[Proto_SCTP];
         port_them &= 0xFFFF;
@@ -1582,6 +1601,17 @@ template_selftest(void)
     failures += memcmp(packet + tmplset->pkts[Proto_UDP].ipv4.offset_app,
                        "\x00\x00\x00\x00\x00\x00\x00\x00"
                        "\x89\xab\xcd\xef", 12) != 0;
+
+    template_set_target_ipv4(tmplset, 0xc0000201,
+                             Templ_UDP + 2427, 0xc6336401, 40000,
+                             0, packet, sizeof(packet), &packet_length);
+    {
+        const char *expected = "AUEP 1 *@[192.0.2.1] MGCP 1.0\r\n";
+        failures += packet_length !=
+            tmplset->pkts[Proto_UDP].ipv4.offset_app + strlen(expected);
+        failures += memcmp(packet + tmplset->pkts[Proto_UDP].ipv4.offset_app,
+                           expected, strlen(expected)) != 0;
+    }
 
     if (failures)
         fprintf(stderr, "template: failed\n");

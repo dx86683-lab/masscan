@@ -296,7 +296,7 @@ proto_udp_selftest(void)
     parsed.app_length = sizeof(response);
     cookie = syn_cookie(parsed.src_ip, parsed.port_src | Templ_UDP,
                         parsed.dst_ip, parsed.port_dst, 7);
-    if (!udp_probe_prepare(80, cookie, &request))
+    if (!udp_probe_prepare(80, cookie, NULL, &request))
         return 1;
     response[0] = 0xc0;
     memset(response + 1, 0, 4);
@@ -323,7 +323,7 @@ proto_udp_selftest(void)
     parsed.app_length = 24;
     cookie = syn_cookie(parsed.src_ip, parsed.port_src | Templ_UDP,
                         parsed.dst_ip, parsed.port_dst, 7);
-    if (!udp_probe_prepare(64738, (uint32_t)cookie, &request))
+    if (!udp_probe_prepare(64738, (uint32_t)cookie, NULL, &request))
         return 1;
     memset(response, 0, sizeof(response));
     response[1] = 1;
