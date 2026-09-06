@@ -49,6 +49,7 @@ enum ApplicationProtocol {
 
     PROTO_MUMBLE,
     PROTO_MGCP,
+    PROTO_SIP,
 
     PROTO_end_of_list /* must be last one */
 };

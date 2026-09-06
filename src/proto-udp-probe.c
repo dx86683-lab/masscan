@@ -1,4 +1,5 @@
 #include "proto-udp-probe.h"
+#include "proto-udp-sip.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -230,6 +231,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {6969, PROTO_BITTORRENT, bittorrent_prepare, bittorrent_classify},
     {64738, PROTO_MUMBLE, mumble_prepare, mumble_classify},
     {2427, PROTO_MGCP, mgcp_prepare, mgcp_classify},
+    {6060, PROTO_SIP, sip_probe_prepare, sip_probe_classify},
     {0, PROTO_NONE, 0, 0}
 };
 
@@ -339,6 +341,87 @@ udp_probe_catalog_selftest(void)
     if (udp_probe_classify(2427, (const unsigned char *)"200 309737970 OK\r\n",
                            18, cookie) != PROTO_MGCP)
         return 1;
+    {
+        const char *sip = "SIP/2.0 200 OK\r\n"
+            "Via: SIP/2.0/UDP 192.0.2.2:40000;branch=z9hG4bK00000001\r\n"
+            "Call-ID: scan-00000001@scan.invalid\r\n"
+            "CSeq: 1 OPTIONS\r\nContent-Length: 0\r\n\r\n";
+        if (udp_probe_classify(6060, (const unsigned char *)sip,
+                              (unsigned)strlen(sip), 1) != PROTO_SIP)
+            return 1;
+        for (i = 0; i < strlen(sip); i++) {
+            if (udp_probe_classify(6060, (const unsigned char *)sip, i, 1) != PROTO_NONE)
+                return 1;
+        }
+        if (udp_probe_classify(6060, (const unsigned char *)sip,
+                              (unsigned)strlen(sip), 2) != PROTO_NONE)
+            return 1;
+        {
+            char altered[512];
+            static const char *fields[] = {"z9hG4bK00000001", "scan-00000001",
+                                          "1 OPTIONS", "Content-Length: 0"};
+            for (i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
+                char *field;
+                memcpy(altered, sip, strlen(sip) + 1);
+                field = strstr(altered, fields[i]);
+                if (!field) return 1;
+                field[strlen(fields[i]) - 1] = '9';
+                if (udp_probe_classify(6060, (const unsigned char *)altered,
+                                      (unsigned)strlen(altered), 1) != PROTO_NONE)
+                    return 1;
+            }
+        }
+        sip = "SIP/2.0 403 Forbidden\r\n"
+            "v: SIP/2.0/UDP 192.0.2.2:40000;rport=40000;\r\n"
+            " branch=z9hG4bK00000001\r\n"
+            "i: scan-00000001@scan.invalid\r\n"
+            "cseq: 0001\tOPTIONS\r\nl: 0\r\n\r\n";
+        if (udp_probe_classify(6060, (const unsigned char *)sip,
+                              (unsigned)strlen(sip), 1) != PROTO_SIP)
+            return 1;
+        {
+            static const char *bad_vias[] = {
+                "SIP/2.0/UDP x;branch=z9hG4bK00000001suffix",
+                "SIP/2.0/UDP x;branch=wrong, SIP/2.0/UDP y;branch=z9hG4bK00000001",
+                "SIP/2.0/UDP x;branch=z9hG4bK00000001;branch=z9hG4bK00000001",
+                "SIP/2.0/UDP x;other=\";branch=z9hG4bK00000001\"",
+                "SIP/2.0/UDP x;branch=\"z9hG4bK00000001\""
+            };
+            char packet[512];
+            for (i = 0; i < sizeof(bad_vias) / sizeof(bad_vias[0]); i++) {
+                int length = snprintf(packet, sizeof(packet),
+                    "SIP/2.0 200 OK\r\nVia: %s\r\n"
+                    "Call-ID: scan-00000001@scan.invalid\r\n"
+                    "CSeq: 1 OPTIONS\r\n\r\n", bad_vias[i]);
+                if (length < 0 || (unsigned)length >= sizeof(packet) ||
+                    udp_probe_classify(6060, (const unsigned char *)packet,
+                                       (unsigned)length, 1) != PROTO_NONE)
+                    return 1;
+            }
+        }
+        {
+            struct UdpProbeTarget target;
+            memset(&target, 0, sizeof(target));
+            target.source.version = target.destination.version = 4;
+            target.source.ipv4 = 0xc0000202;
+            target.destination.ipv4 = 0xc0000201;
+            target.source_port = 40000;
+            if (!udp_probe_prepare(6060, 1, &target, &result) ||
+                strstr((char *)result.payload, "Via: SIP/2.0/UDP 192.0.2.2:40000;") == NULL ||
+                strstr((char *)result.payload, "OPTIONS sip:192.0.2.1:6060 SIP/2.0\r\n") == NULL)
+                return 1;
+            target.source.version = target.destination.version = 6;
+            target.source.ipv6.hi = target.destination.ipv6.hi = UINT64_C(0x20010db800000000);
+            target.source.ipv6.lo = 2;
+            target.destination.ipv6.lo = 1;
+            if (!udp_probe_prepare(6060, 1, &target, &result) ||
+                strstr((char *)result.payload, "Via: SIP/2.0/UDP [2001:db8::2]:40000;") == NULL)
+                return 1;
+            if (udp_probe_prepare(6060, 1, NULL, &result)) return 1;
+            target.source_port = 0;
+            if (udp_probe_prepare(6060, 1, &target, &result)) return 1;
+        }
+    }
     {
         static const struct {
             const char *response;
