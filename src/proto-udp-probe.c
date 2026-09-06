@@ -527,7 +527,7 @@ coap_probe_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
                    struct UdpPreparedProbe *result)
 {
     (void)target;
-    result->payload[0] = 0x54;
+    result->payload[0] = 0x44;
     result->payload[1] = 1;
     result->payload[2] = (unsigned char)(cookie >> 8);
     result->payload[3] = (unsigned char)cookie;
@@ -558,8 +558,10 @@ static int
 coap_probe_classify(const unsigned char *response, unsigned length, uint64_t cookie)
 {
     unsigned offset = 8, number = 0, seen = 0, code;
-    if (length < 8 || (response[0] & 0xcf) != 0x44 || (response[0] & 0x20) ||
+    if (length < 8 || (response[0] & 0xcf) != 0x44 || (response[0] & 0x30) == 0x30 ||
         read_u32_be(response + 4) != (uint32_t)cookie) return 0;
+    if ((response[0] & 0x30) == 0x20 &&
+        (((unsigned)response[2] << 8 | response[3]) != (cookie & 0xffff))) return 0;
     code = response[1] >> 5;
     if (code != 2 && code != 4 && code != 5) return 0;
     while (offset < length) {
@@ -756,6 +758,9 @@ udp_probe_catalog_selftest(void)
         if (udp_probe_classify(5683, reply, 8, cookie) != PROTO_COAP) return 1;
         reply[0] = 0x64;
         if (udp_probe_classify(5683, reply, 8, cookie) != PROTO_NONE) return 1;
+        reply[2] = 0xcd;
+        reply[3] = 0xef;
+        if (udp_probe_classify(5683, reply, 8, cookie) != PROTO_COAP) return 1;
         reply[0] = 0x55;
         if (udp_probe_classify(5683, reply, 8, cookie) != PROTO_NONE) return 1;
         reply[0] = 0x54;
@@ -783,7 +788,7 @@ udp_probe_catalog_selftest(void)
         reply[9] = reply[10] = 255;
         if (udp_probe_classify(5683, reply, 11, cookie) != PROTO_NONE) return 1;
         if (!udp_probe_prepare(5683, cookie, NULL, &result) || result.length != 25 ||
-            memcmp(result.payload, "\x54\x01\xcd\xef\x89\xab\xcd\xef\xbb.well-known\x04" "core", 25))
+            memcmp(result.payload, "\x44\x01\xcd\xef\x89\xab\xcd\xef\xbb.well-known\x04" "core", 25))
             return 1;
     }
     {
