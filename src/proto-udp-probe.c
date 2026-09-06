@@ -437,6 +437,41 @@ rpc_probe_classify(const unsigned char *response, unsigned length, uint64_t cook
     return status <= 5 && offset == length;
 }
 
+static int
+gtpu_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+              struct UdpPreparedProbe *result)
+{
+    (void)target;
+    memset(result->payload, 0, 12);
+    result->payload[0] = 0x32;
+    result->payload[1] = 1;
+    result->payload[3] = 4;
+    result->payload[8] = (unsigned char)(cookie >> 8);
+    result->payload[9] = (unsigned char)cookie;
+    result->length = 12;
+    return 1;
+}
+
+static int
+gtpu_classify(const unsigned char *response, unsigned length, uint64_t cookie)
+{
+    unsigned offset = 14, size;
+    if (length < 14 || (response[0] & 0xf6) != 0x32 || response[1] != 2 ||
+        ((unsigned)response[2] << 8 | response[3]) != length - 8 ||
+        read_u32_be(response + 4) != 0 ||
+        response[8] != (unsigned char)(cookie >> 8) ||
+        response[9] != (unsigned char)cookie || response[12] != 14) return 0;
+    /* Recovery's counter and unused optional-header fields are ignored. */
+    while (offset < length) {
+        if (length - offset < 3 || response[offset] != 255) return 0;
+        size = (unsigned)response[offset + 1] << 8 | response[offset + 2];
+        offset += 3;
+        if (size < 2 || size > length - offset) return 0;
+        offset += size;
+    }
+    return 1;
+}
+
 static const struct UdpProbeSpec udp_probe_catalog[] = {
     {80, PROTO_QUIC, quic_prepare, quic_classify},
     {6969, PROTO_BITTORRENT, bittorrent_prepare, bittorrent_classify},
@@ -449,6 +484,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {123, PROTO_NTP, ntp_probe_prepare, ntp_probe_classify},
     {5351, PROTO_NATPMP, natpmp_prepare, natpmp_classify},
     {111, PROTO_RPC, rpc_probe_prepare, rpc_probe_classify},
+    {2152, PROTO_GTPU, gtpu_prepare, gtpu_classify},
     {0, PROTO_NONE, 0, 0}
 };
 
@@ -531,6 +567,48 @@ udp_probe_catalog_selftest(void)
     };
     unsigned i;
 
+    {
+        unsigned char reply[19] = {
+            0x32, 2, 0, 6, 0, 0, 0, 0, 0xcd, 0xef, 0, 0, 14, 7
+        };
+        if (udp_probe_classify(2152, reply, 14, cookie) != PROTO_GTPU)
+            return 1;
+        for (i = 0; i < 14; i++)
+            if (udp_probe_classify(2152, reply, i, cookie) != PROTO_NONE) return 1;
+        if (udp_probe_classify(2152, reply, 14, cookie ^ 1) != PROTO_NONE ||
+            udp_probe_classify(2152, reply, 15, cookie) != PROTO_NONE) return 1;
+        reply[0] = 0x30;
+        if (udp_probe_classify(2152, reply, 14, cookie) != PROTO_NONE) return 1;
+        reply[0] = 0x36;
+        if (udp_probe_classify(2152, reply, 14, cookie) != PROTO_NONE) return 1;
+        reply[0] = 0x22;
+        if (udp_probe_classify(2152, reply, 14, cookie) != PROTO_NONE) return 1;
+        reply[0] = 0x3b;
+        reply[10] = reply[11] = 0xff;
+        if (udp_probe_classify(2152, reply, 14, cookie) != PROTO_GTPU) return 1;
+        reply[1] = 26;
+        if (udp_probe_classify(2152, reply, 14, cookie) != PROTO_NONE) return 1;
+        reply[1] = 2;
+        reply[7] = 1;
+        if (udp_probe_classify(2152, reply, 14, cookie) != PROTO_NONE) return 1;
+        reply[7] = 0;
+        reply[12] = 15;
+        if (udp_probe_classify(2152, reply, 14, cookie) != PROTO_NONE) return 1;
+        reply[12] = 14;
+        reply[3] = 11;
+        reply[14] = 255;
+        reply[16] = 2;
+        if (udp_probe_classify(2152, reply, 19, cookie) != PROTO_GTPU) return 1;
+        reply[16] = 3;
+        if (udp_probe_classify(2152, reply, 19, cookie) != PROTO_NONE) return 1;
+        reply[16] = 1;
+        if (udp_probe_classify(2152, reply, 19, cookie) != PROTO_NONE) return 1;
+        reply[14] = 14;
+        if (udp_probe_classify(2152, reply, 19, cookie) != PROTO_NONE) return 1;
+        if (!udp_probe_prepare(2152, cookie, NULL, &result) || result.length != 12 ||
+            memcmp(result.payload, "\x32\x01\x00\x04\x00\x00\x00\x00\xcd\xef\x00\x00", 12))
+            return 1;
+    }
     {
         unsigned char reply[425] = {
             0x89, 0xab, 0xcd, 0xef, 0, 0, 0, 1,

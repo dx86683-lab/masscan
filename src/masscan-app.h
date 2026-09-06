@@ -54,6 +54,7 @@ enum ApplicationProtocol {
     PROTO_XDMCP,
     PROTO_NATPMP,
     PROTO_RPC,
+    PROTO_GTPU,
 
     PROTO_end_of_list /* must be last one */
 };
