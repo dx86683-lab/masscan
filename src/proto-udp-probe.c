@@ -4,6 +4,8 @@
 #include "proto-udp-mdns.h"
 #include "proto-udp-sqlr.h"
 #include "proto-udp-ssdp.h"
+#include "proto-udp-openvpn.h"
+#include "proto-udp-runtime.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -846,6 +848,9 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {1434, PROTO_SQL_BROWSER, sqlr_probe_prepare, sqlr_probe_classify},
     {47808, PROTO_BACNET, bacnet_prepare, bacnet_classify},
     {1900, PROTO_SSDP, ssdp_probe_prepare, ssdp_probe_classify},
+#ifdef UDP_EXTENDED_PROBES
+    {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
+#endif
     {0, PROTO_NONE, 0, 0}
 };
 
@@ -928,6 +933,31 @@ udp_probe_catalog_selftest(void)
     };
     unsigned i;
 
+#ifdef UDP_EXTENDED_PROBES
+    {
+        unsigned char reply[26] = {0x40, 1, 2, 3, 4, 5, 6, 7, 8, 1};
+        if (!udp_probe_runtime_init()) return 1;
+        if (!udp_probe_prepare(1194, cookie, NULL, &result) || result.length != 14) return 1;
+        memcpy(reply + 14, result.payload + 1, 8);
+        if (udp_probe_classify(1194, reply, sizeof(reply), cookie) != PROTO_OPENVPN) return 1;
+        if (result.payload[0] != 0x38 || memcmp(result.payload + 9, "\x00\x00\x00\x00\x00", 5)) return 1;
+        for (i = 0; i < sizeof(reply); i++)
+            if (udp_probe_classify(1194, reply, i, cookie) != PROTO_NONE) return 1;
+        if (udp_probe_classify(1194, reply, sizeof(reply), cookie ^ 1) != PROTO_NONE ||
+            udp_probe_classify(1194, result.payload, result.length, cookie) != PROTO_NONE) return 1;
+        for (i = 0; i < sizeof(reply); i++) {
+            unsigned char saved = reply[i];
+            if (i > 0 && i < 9) continue;
+            reply[i] ^= 1;
+            if (udp_probe_classify(1194, reply, sizeof(reply), cookie) != PROTO_NONE) return 1;
+            reply[i] = saved;
+        }
+        memset(reply + 1, 0, 8);
+        if (udp_probe_classify(1194, reply, sizeof(reply), cookie) != PROTO_NONE) return 1;
+        if (!udp_probe_prepare(1194, cookie, NULL, &result) ||
+            memcmp(result.payload + 1, reply + 14, 8)) return 1;
+    }
+#endif
     {
         static const unsigned char reply[] =
             "\x81\x0a\x00\x14\x01\x00\x10\x00\xc4\x02\x00\x00\x7b\x22\x05\xc4\x91\x03\x21\x0f";

@@ -98,13 +98,25 @@ endif
 
 
 DEFINES = 
+WITH_UDP_EXTENSIONS ?= 0
+OBJDIR = tmp
+ifeq ($(WITH_UDP_EXTENSIONS),1)
+ifeq ($(shell pkg-config --exists openssl expat && echo yes),)
+$(error WITH_UDP_EXTENSIONS=1 requires OpenSSL and Expat development packages and pkg-config)
+endif
+DEFINES += -DUDP_EXTENDED_PROBES
+INCLUDES += $(shell pkg-config --cflags openssl expat)
+LIBS += $(shell pkg-config --libs openssl expat)
+OBJDIR = tmp/extended
+endif
 CFLAGS = -g -ggdb $(FLAGS2) $(INCLUDES) $(DEFINES) -Wall -O2
 .SUFFIXES: .c .cpp
 
 all: bin/masscan 
 
 
-tmp/main-conf.o: src/main-conf.c src/*.h
+$(OBJDIR)/main-conf.o: src/main-conf.c src/*.h
+	@mkdir -p $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@ -DGIT=\"$(GITVER)\"
 
 
@@ -112,19 +124,21 @@ tmp/main-conf.o: src/main-conf.c src/*.h
 # means that include file dependencies are broken, so sometimes when
 # the program crashes unexpectedly, 'make clean' then 'make' fixes the
 # problem that a .h file was out of date
-tmp/%.o: src/%.c src/*.h
+$(OBJDIR)/%.o: src/%.c src/*.h
+	@mkdir -p $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 
 SRC = $(sort $(wildcard src/*.c))
-OBJ = $(addprefix tmp/, $(notdir $(addsuffix .o, $(basename $(SRC))))) 
+OBJ = $(addprefix $(OBJDIR)/, $(notdir $(addsuffix .o, $(basename $(SRC)))))
 
 
-bin/masscan: $(OBJ)
+bin/masscan: $(OBJ) FORCE
 	$(CC) $(CFLAGS) -o $@ $(OBJ) $(LDFLAGS) $(LIBS)
 
 clean:
 	rm -f tmp/*.o
+	rm -f tmp/extended/*.o
 	rm -f bin/masscan
 
 regress: bin/masscan
@@ -136,3 +150,6 @@ install: bin/masscan
 	install $(INSTALL_DATA) bin/masscan $(DESTDIR)$(BINDIR)/masscan
 	
 default: bin/masscan
+
+.PHONY: FORCE
+FORCE:

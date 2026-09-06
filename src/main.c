@@ -16,6 +16,7 @@
     to make this file relative "flat" this way so that everything is visible.
 */
 #include "masscan.h"
+#include "proto-udp-runtime.h"
 #include "masscan-version.h"
 #include "masscan-status.h"     /* open or closed */
 #include "massip-parse.h"
@@ -1664,6 +1665,10 @@ int main(int argc, char *argv[])
     /* Init some protocol parser data structures */
     snmp_init();
     x509_init();
+    if (!udp_probe_runtime_init()) {
+        fprintf(stderr, "UDP probe random initialization failed\n");
+        return 1;
+    }
 
 
     /*

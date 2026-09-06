@@ -67,6 +67,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_SQL_BROWSER:      return "sql-browser";
     case PROTO_BACNET:           return "bacnet";
     case PROTO_SSDP:             return "ssdp";
+    case PROTO_OPENVPN:          return "openvpn";
         
     case PROTO_ERROR:           return "error";
             
@@ -140,6 +141,7 @@ masscan_string_to_app(const char *str)
         {"sql-browser", PROTO_SQL_BROWSER},
         {"bacnet",      PROTO_BACNET},
         {"ssdp",        PROTO_SSDP},
+        {"openvpn",     PROTO_OPENVPN},
         {0,0}
     };
     size_t i;
@@ -181,6 +183,7 @@ masscan_app_selftest(void) {
         {PROTO_SQL_BROWSER, 54},
         {PROTO_BACNET, 55},
         {PROTO_SSDP, 56},
+        {PROTO_OPENVPN, 57},
         {0,0}
     };
     size_t i;
@@ -255,6 +258,9 @@ masscan_app_selftest(void) {
         return 1;
     if (masscan_string_to_app("ssdp") != PROTO_SSDP ||
         strcmp(masscan_app_to_string(PROTO_SSDP), "ssdp") != 0)
+        return 1;
+    if (masscan_string_to_app("openvpn") != PROTO_OPENVPN ||
+        strcmp(masscan_app_to_string(PROTO_OPENVPN), "openvpn") != 0)
         return 1;
     return 0;
 }
