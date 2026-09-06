@@ -28,6 +28,7 @@
 #include "proto-udp-ventrilo.h"
 #include "proto-udp-text-discovery.h"
 #include "proto-udp-fins.h"
+#include "proto-udp-dahua.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -895,6 +896,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {9600, PROTO_FINS, fins_probe_prepare, fins_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {37020, PROTO_HIKVISION, hikvision_probe_prepare, hikvision_probe_classify},
+    {37810, PROTO_DAHUA, dahua_probe_prepare, dahua_probe_classify},
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
     {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
     {33848, PROTO_JENKINS, jenkins_probe_prepare, jenkins_probe_classify},
@@ -1030,11 +1032,124 @@ onvif_fixture_case(const char *original, const char *needle, const char *replace
 }
 #endif
 
+#ifdef UDP_EXTENDED_PROBES
+static int
+dahua_json_replacement(const char *original, const char *needle, const char *replacement, int expected)
+{
+    unsigned char frame[8192] = {0};
+    const char *position = strstr(original, needle);
+    size_t prefix, inserted = strlen(replacement), suffix, length;
+    unsigned i;
+    if (!position) return 0;
+    prefix = (size_t)(position - original); suffix = strlen(position + strlen(needle));
+    length = prefix + inserted + suffix;
+    if (length > sizeof(frame) - 32) return 0;
+    frame[0] = 32; memcpy(frame + 4, "DHIP", 4);
+    for (i = 0; i < 4; i++) frame[16 + i] = frame[24 + i] = (unsigned char)(length >> (8 * i));
+    memcpy(frame + 32, original, prefix);
+    memcpy(frame + 32 + prefix, replacement, inserted);
+    memcpy(frame + 32 + prefix + inserted, position + strlen(needle), suffix);
+    return (udp_probe_classify(37810, frame, (unsigned)length + 32, 0) == PROTO_DAHUA) == expected;
+}
+#endif
+
 int
 udp_probe_catalog_selftest(void)
 {
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
+#ifdef UDP_EXTENDED_PROBES
+    {
+        static const unsigned char reply[] =
+            "\x20\x00\x00\x00" "DHIP\x00\x00\x00\x00\x00\x00\x00\x00"
+            "\x96\x00\x00\x00\x00\x00\x00\x00\x96\x00\x00\x00\x00\x00\x00\x00"
+            "{\"method\":\"client.notifyDevInfo\",\"params\":{\"deviceInfo\":{\"DeviceType\":\"TEST-CAMERA\",\"SerialNo\":\"TEST-0001\",\"IPv4Address\":{\"IPAddress\":\"192.0.2.10\"}}}}";
+        unsigned n;
+        unsigned char changed[sizeof(reply) + 1];
+        if (sizeof(reply) != 183 || udp_probe_classify(37810, reply, sizeof(reply) - 1, cookie) != PROTO_DAHUA) {
+            fprintf(stderr, "dahua: independent frame rejected\n"); return 1;
+        }
+        if (!udp_probe_prepare(37810, cookie, NULL, &result) || result.length != 90 ||
+            memcmp(result.payload + 32, "{\"method\":\"DHDiscover.search\",\"params\":{\"mac\":\"\",\"uni\":1}}", 58)) return 1;
+        for (n = 0; n < sizeof(reply) - 1; n++)
+            if (udp_probe_classify(37810, reply, n, cookie) != PROTO_NONE) return 1;
+        for (n = 0; n < 32; n++) {
+            if (n >= 8 && n < 16) continue;
+            memcpy(changed, reply, sizeof(reply)); changed[n] ^= 1;
+            if (udp_probe_classify(37810, changed, sizeof(reply) - 1, cookie) != PROTO_NONE) return 1;
+        }
+        memcpy(changed, reply, sizeof(reply)); changed[8] = 7; changed[12] = 9;
+        if (udp_probe_classify(37810, changed, sizeof(reply) - 1, cookie) != PROTO_DAHUA) return 1;
+        memcpy(changed, reply, sizeof(reply)); changed[16]++; changed[24]++;
+        if (udp_probe_classify(37810, changed, sizeof(reply), cookie) != PROTO_NONE) return 1;
+        memcpy(changed, reply, sizeof(reply));
+        memset(changed + 16, 255, 4); memset(changed + 24, 255, 4);
+        if (udp_probe_classify(37810, changed, sizeof(reply) - 1, cookie) != PROTO_NONE) return 1;
+        {
+            static const struct { const char *needle, *replacement; int accepted; } cases[] = {
+                {"client.notifyDevInfo", "DHDiscover.search", 0},
+                {"\"TEST-CAMERA\"", "123", 0},
+                {"TEST-0001", "", 0},
+                {"192.0.2.10", "999.0.2.10", 0},
+                {"\"method\":", "\"mac\":\"\",\"method\":", 1},
+                {"\"IPv4Address\":{\"IPAddress\":\"192.0.2.10\"}", "\"extra\":0", 0},
+                {"\"SerialNo\":\"TEST-0001\",", "", 0},
+                {"\"params\":{\"deviceInfo\":{\"DeviceType\":\"TEST-CAMERA\",\"SerialNo\":\"TEST-0001\",\"IPv4Address\":{\"IPAddress\":\"192.0.2.10\"}}}", "\"params\":[]", 0},
+                {"{\"DeviceType\":\"TEST-CAMERA\",\"SerialNo\":\"TEST-0001\",\"IPv4Address\":{\"IPAddress\":\"192.0.2.10\"}}", "\"device\"", 0},
+                {"\"params\":", "\"mac\":\"02:00:00:00:00:01\",\"params\":", 1},
+                {"\"method\":", "\"method\":\"wrong\",\"method\":", 0},
+                {"\"method\"", "\"\\u006dethod\"", 1},
+                {"TEST-0001", "TEST\\u0000VALUE", 0},
+                {"TEST-0001", "TEST\\nVALUE", 0},
+                {"TEST-CAMERA", "测试设备", 1},
+                {"TEST-CAMERA", "\xc0\xaf", 0},
+                {"}}}}", "}}}}{}", 0},
+                {"\"params\":", "\"x\":[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]],\"params\":", 0}
+            };
+            for (n = 0; n < sizeof(cases) / sizeof(*cases); n++)
+                if (!dahua_json_replacement((const char *)reply + 32, cases[n].needle,
+                    cases[n].replacement, cases[n].accepted)) {
+                    fprintf(stderr, "dahua: JSON case failed at %u\n", n); return 1;
+                }
+            if (!dahua_json_replacement(
+                "{\"method\":\"client.notifyDevInfo\",\"mac\":\"02:00:00:00:00:01\",\"params\":{\"deviceInfo\":{\"DeviceType\":\"CAMERA\",\"SerialNo\":\"TEST\"}}}",
+                "\"SerialNo\":\"TEST\"", "\"SerialNo\":\"TEST\",\"IPv4Address\":{\"IPAddress\":\"invalid\"}", 1)) return 1;
+            if (!dahua_json_replacement(
+                "{\"method\":\"client.notifyDevInfo\",\"mac\":\"02:00:00:00:00:01\",\"params\":{\"deviceInfo\":{\"DeviceType\":\"CAMERA\",\"SerialNo\":\"TEST\"}}}",
+                "TEST", "TEST-MAC-ONLY", 1)) return 1;
+            if (!dahua_json_replacement((const char *)reply + 32,
+                "\"method\":\"client.notifyDevInfo\"",
+                "\"method\":\"wrong\",\"text\":\"method:client.notifyDevInfo\"", 0)) return 1;
+            {
+                char replacement[800];
+                unsigned count, used, j;
+                for (count = 247; count <= 248; count++) {
+                    memcpy(replacement, "\"extra\":[", 9); used = 9;
+                    for (j = 0; j < count; j++) {
+                        if (j) replacement[used++] = ',';
+                        replacement[used++] = '0';
+                    }
+                    memcpy(replacement + used, "],\"method\":", sizeof("],\"method\":"));
+                    if (!dahua_json_replacement((const char *)reply + 32,
+                        "\"method\":", replacement, count == 247)) return 1;
+                }
+                for (count = 512; count <= 513; count++) {
+                    memcpy(replacement, "\"extra\":\"", 9);
+                    memset(replacement + 9, 'x', count);
+                    memcpy(replacement + 9 + count, "\",\"method\":", sizeof("\",\"method\":"));
+                    if (!dahua_json_replacement((const char *)reply + 32,
+                        "\"method\":", replacement, count == 512)) return 1;
+                }
+                for (count = 128; count <= 129; count++) {
+                    replacement[0] = '"'; memset(replacement + 1, 'k', count);
+                    memcpy(replacement + 1 + count, "\":0,\"method\":", sizeof("\":0,\"method\":"));
+                    if (!dahua_json_replacement((const char *)reply + 32,
+                        "\"method\":", replacement, count == 128)) return 1;
+                }
+            }
+        }
+    }
+#endif
     {
         unsigned char reply[107] = {0}, changed[107];
         unsigned n;

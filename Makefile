@@ -101,12 +101,12 @@ DEFINES =
 WITH_UDP_EXTENSIONS ?= 0
 OBJDIR = tmp
 ifeq ($(WITH_UDP_EXTENSIONS),1)
-ifeq ($(shell pkg-config --exists openssl expat && echo yes),)
-$(error WITH_UDP_EXTENSIONS=1 requires OpenSSL and Expat development packages and pkg-config)
+ifeq ($(shell pkg-config --exists openssl expat 'jansson >= 2.7' && echo yes),)
+$(error WITH_UDP_EXTENSIONS=1 requires OpenSSL, Expat, Jansson >= 2.7 development packages and pkg-config)
 endif
 DEFINES += -DUDP_EXTENDED_PROBES
-INCLUDES += $(shell pkg-config --cflags openssl expat)
-LIBS += $(shell pkg-config --libs openssl expat)
+INCLUDES += $(shell pkg-config --cflags openssl expat jansson)
+LIBS += $(shell pkg-config --libs openssl expat jansson)
 OBJDIR = tmp/extended
 endif
 CFLAGS = -g -ggdb $(FLAGS2) $(INCLUDES) $(DEFINES) -Wall -O2

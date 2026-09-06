@@ -98,6 +98,7 @@ enum ApplicationProtocol {
     PROTO_SERIALNUMBERD,
     PROTO_HIKVISION,
     PROTO_FINS,
+    PROTO_DAHUA,
 
     PROTO_end_of_list /* must be last one */
 };

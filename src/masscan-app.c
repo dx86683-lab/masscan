@@ -100,6 +100,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_SERIALNUMBERD:    return "serialnumberd";
     case PROTO_HIKVISION:        return "hikvision";
     case PROTO_FINS:             return "fins";
+    case PROTO_DAHUA:            return "dahua";
         
     case PROTO_ERROR:           return "error";
             
@@ -206,6 +207,7 @@ masscan_string_to_app(const char *str)
         {"serialnumberd", PROTO_SERIALNUMBERD},
         {"hikvision",   PROTO_HIKVISION},
         {"fins",        PROTO_FINS},
+        {"dahua",       PROTO_DAHUA},
         {0,0}
     };
     size_t i;
@@ -280,6 +282,7 @@ masscan_app_selftest(void) {
         {PROTO_SERIALNUMBERD, 87},
         {PROTO_HIKVISION, 88},
         {PROTO_FINS, 89},
+        {PROTO_DAHUA, 90},
         {0,0}
     };
     size_t i;

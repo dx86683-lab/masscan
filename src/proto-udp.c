@@ -130,7 +130,8 @@ handle_udp(struct Output *out, time_t timestamp,
             probe_protocol == PROTO_HIFLY || probe_protocol == PROTO_HID ||
             probe_protocol == PROTO_GARDASOFT || probe_protocol == PROTO_GARDASOFT_VERSION ||
             probe_protocol == PROTO_VENTRILO || probe_protocol == PROTO_SERIALNUMBERD ||
-            probe_protocol == PROTO_HIKVISION || probe_protocol == PROTO_FINS) {
+            probe_protocol == PROTO_HIKVISION || probe_protocol == PROTO_FINS ||
+            probe_protocol == PROTO_DAHUA) {
             banner_data = (const unsigned char *)"discovery-response";
             banner_length = 18;
         }
@@ -509,6 +510,10 @@ proto_udp_selftest(void)
             {626, sizeof(serial_reply), PROTO_SERIALNUMBERD, serial_reply},
 #ifdef UDP_EXTENDED_PROBES
             {37020, sizeof(sadp_reply) - 1, PROTO_HIKVISION, sadp_reply},
+            {37810, 182, PROTO_DAHUA,
+                "\x20\x00\x00\x00" "DHIP\x00\x00\x00\x00\x00\x00\x00\x00"
+                "\x96\x00\x00\x00\x00\x00\x00\x00\x96\x00\x00\x00\x00\x00\x00\x00"
+                "{\"method\":\"client.notifyDevInfo\",\"params\":{\"deviceInfo\":{\"DeviceType\":\"TEST-CAMERA\",\"SerialNo\":\"TEST-0001\",\"IPv4Address\":{\"IPAddress\":\"192.0.2.10\"}}}}"},
 #endif
         };
         unsigned f;
