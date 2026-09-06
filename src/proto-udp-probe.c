@@ -18,6 +18,7 @@
 #include "proto-udp-knx.h"
 #include "proto-udp-slmp.h"
 #include "proto-udp-enttec.h"
+#include "proto-udp-a2s.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -867,6 +868,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {5006, PROTO_SLMP, slmp_probe_prepare, slmp_probe_classify},
     {5007, PROTO_SLMP, slmp_probe_prepare, slmp_probe_classify},
     {3333, PROTO_ENTTEC, enttec_probe_prepare, enttec_probe_classify},
+    {27015, PROTO_A2S, a2s_probe_prepare, a2s_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
     {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
@@ -972,6 +974,45 @@ udp_probe_catalog_selftest(void)
 {
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
+    {
+        static const unsigned char reply[] =
+            "\xff\xff\xff\xff\x49\x11" "Test\x00" "map\x00" "folder\x00" "Game\x00"
+            "\x0a\x00\x01\x10\x00" "dl\x00\x01" "1.0\x00";
+        if (udp_probe_classify(27015, reply, sizeof(reply) - 1, cookie) != PROTO_A2S) return 1;
+        {
+            unsigned char changed[100];
+            unsigned n = sizeof(reply) - 1;
+            memcpy(changed, reply, n);
+            changed[n] = 0;
+            if (udp_probe_classify(27015, changed, n + 1, cookie) != PROTO_A2S) return 1;
+            changed[n] = 0xf1;
+            memcpy(changed + n + 1, "\x87\x69\x01\x00\x00\x00\x00\x00\x00\x00\x88\x69" "TV\x00" "tag\x00" "\x0a\x00\x00\x00\x00\x00\x00\x00", 27);
+            if (udp_probe_classify(27015, changed, n + 28, cookie) != PROTO_A2S) return 1;
+            {
+                unsigned j;
+                if (!udp_probe_prepare(27015, cookie, NULL, &result) || result.length != 25 ||
+                    memcmp(result.payload, "\xff\xff\xff\xff\x54" "Source Engine Query", 25)) return 1;
+                for (j = 0; j < n; j++)
+                    if (udp_probe_classify(27015, reply, j, cookie) != PROTO_NONE) return 1;
+                for (j = n + 1; j < n + 28; j++)
+                    if (udp_probe_classify(27015, changed, j, cookie) != PROTO_NONE) return 1;
+                changed[n] = 2;
+                if (udp_probe_classify(27015, changed, n + 1, cookie) != PROTO_NONE) return 1;
+                memcpy(changed, reply, n); changed[4] = 0x41;
+                if (udp_probe_classify(27015, changed, 9, cookie) != PROTO_NONE) return 1;
+                changed[4] = 0x49; changed[0] = 0xfe;
+                if (udp_probe_classify(27015, changed, n, cookie) != PROTO_NONE) return 1;
+                memcpy(changed, reply, n); changed[32] = 'x';
+                if (udp_probe_classify(27015, changed, n, cookie) != PROTO_NONE) return 1;
+                memcpy(changed, reply, n); changed[34] = 2;
+                if (udp_probe_classify(27015, changed, n, cookie) != PROTO_NONE) return 1;
+                memcpy(changed, reply, n); changed[27] = 0x60; changed[28] = 9;
+                memmove(changed + 39, changed + 36, n - 36);
+                memset(changed + 36, 0, 3);
+                if (udp_probe_classify(27015, changed, n + 3, cookie) != PROTO_A2S) return 1;
+            }
+        }
+    }
     {
         static const unsigned char reply[] =
             "ESPR\x02\x00\x00\x00\x00\x01\x00\x0a\x01\x00"

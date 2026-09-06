@@ -81,6 +81,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_KNX:              return "knx";
     case PROTO_SLMP:             return "slmp";
     case PROTO_ENTTEC:           return "enttec";
+    case PROTO_A2S:              return "a2s";
         
     case PROTO_ERROR:           return "error";
             
@@ -168,6 +169,7 @@ masscan_string_to_app(const char *str)
         {"knx",         PROTO_KNX},
         {"slmp",        PROTO_SLMP},
         {"enttec",      PROTO_ENTTEC},
+        {"a2s",         PROTO_A2S},
         {0,0}
     };
     size_t i;
@@ -223,6 +225,7 @@ masscan_app_selftest(void) {
         {PROTO_KNX, 68},
         {PROTO_SLMP, 69},
         {PROTO_ENTTEC, 70},
+        {PROTO_A2S, 71},
         {0,0}
     };
     size_t i;

@@ -79,6 +79,7 @@ enum ApplicationProtocol {
     PROTO_KNX,
     PROTO_SLMP,
     PROTO_ENTTEC,
+    PROTO_A2S,
 
     PROTO_end_of_list /* must be last one */
 };
