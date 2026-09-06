@@ -10,6 +10,7 @@
 #include "proto-udp-jenkins.h"
 #include "proto-udp-dtls.h"
 #include "proto-udp-l2tp.h"
+#include "proto-udp-ikev1.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -858,6 +859,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
     {33848, PROTO_JENKINS, jenkins_probe_prepare, jenkins_probe_classify},
     {3391, PROTO_DTLS, dtls_probe_prepare, dtls_probe_classify},
+    {4500, PROTO_IKEV1, ikev1_probe_prepare, ikev1_probe_classify},
 #endif
     {0, PROTO_NONE, 0, 0}
 };
@@ -992,6 +994,65 @@ udp_probe_catalog_selftest(void)
         }
     }
 #ifdef UDP_EXTENDED_PROBES
+    {
+        unsigned char reply[128] = {0};
+        static const unsigned char sa[] =
+            "\x00\x00\x00\x30\x00\x00\x00\x01\x00\x00\x00\x01"
+            "\x00\x00\x00\x24\x01\x01\x00\x01"
+            "\x00\x00\x00\x1c\x01\x01\x00\x00"
+            "\x80\x01\x00\x07\x80\x02\x00\x02\x80\x03\x00\x03"
+            "\x80\x04\x00\x0e\x80\x0e\x00\x80";
+        if (!udp_probe_runtime_init() || !udp_probe_prepare(4500, cookie, NULL, &result)) return 1;
+        memcpy(reply + 4, result.payload + 4, 8);
+        reply[12] = 1;
+        memcpy(reply + 20, "\x01\x10\x02\x00\x00\x00\x00\x00\x00\x00\x00\x4c", 12);
+        memcpy(reply + 32, sa, sizeof(sa) - 1);
+        if (udp_probe_classify(4500, reply, 80, cookie) != PROTO_IKEV1) return 1;
+        {
+            unsigned char changed[128];
+            static const unsigned offsets[] = {0, 4, 20, 21, 22, 24, 28, 31, 34, 36, 40, 44, 46, 48, 49, 50, 51, 52, 54, 56, 57, 60, 63, 67, 71, 75, 79};
+            if (result.length != 100 || memcmp(result.payload, "\x00\x00\x00\x00", 4) ||
+                memcmp(result.payload + 20, "\x01\x10\x02\x00\x00\x00\x00\x00\x00\x00\x00\x60", 12) ||
+                memcmp(result.payload + 33, sa + 1, sizeof(sa) - 2) || result.payload[32] != 13) return 1;
+            if (udp_probe_classify(4500, result.payload, result.length, cookie) != PROTO_NONE ||
+                udp_probe_classify(4500, reply, 80, cookie ^ 1) != PROTO_NONE) return 1;
+            for (i = 0; i < 80; i++)
+                if (udp_probe_classify(4500, reply, i, cookie) != PROTO_NONE) return 1;
+            for (i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++) {
+                memcpy(changed, reply, 80);
+                changed[offsets[i]] ^= 0x40;
+                if (udp_probe_classify(4500, changed, 80, cookie) != PROTO_NONE) return 1;
+            }
+            memcpy(changed, reply, 80);
+            changed[23] = 1;
+            if (udp_probe_classify(4500, changed, 80, cookie) != PROTO_NONE) return 1;
+            changed[23] = 0x80;
+            if (udp_probe_classify(4500, changed, 80, cookie) != PROTO_IKEV1) return 1;
+            memcpy(changed, reply, 80);
+            changed[32] = 13; changed[31] = 96;
+            memcpy(changed + 80, result.payload + 80, 20);
+            if (udp_probe_classify(4500, changed, 100, cookie) != PROTO_IKEV1) return 1;
+            changed[82] = 1;
+            if (udp_probe_classify(4500, changed, 100, cookie) != PROTO_NONE) return 1;
+            memcpy(changed, reply, 80);
+            memcpy(changed + 60, reply + 76, 4);
+            memcpy(changed + 76, reply + 60, 4);
+            if (udp_probe_classify(4500, changed, 80, cookie) != PROTO_IKEV1) return 1;
+            memcpy(changed + 60, changed + 64, 4);
+            if (udp_probe_classify(4500, changed, 80, cookie) != PROTO_NONE) return 1;
+            memcpy(changed, reply, 80);
+            changed[60] = 0;
+            if (udp_probe_classify(4500, changed, 80, cookie) != PROTO_NONE) return 1;
+            changed[31] = 77; changed[80] = 0;
+            if (udp_probe_classify(4500, changed, 81, cookie) != PROTO_NONE) return 1;
+            memcpy(changed, reply, 32);
+            changed[20] = 13; changed[31] = 96;
+            memcpy(changed + 32, result.payload + 80, 20);
+            changed[32] = 1;
+            memcpy(changed + 52, reply + 32, 48);
+            if (udp_probe_classify(4500, changed, 100, cookie) != PROTO_NONE) return 1;
+        }
+    }
     {
         static const unsigned char reply[] =
             "\x16\xfe\xff\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10"
