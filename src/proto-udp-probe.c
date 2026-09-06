@@ -19,6 +19,7 @@
 #include "proto-udp-slmp.h"
 #include "proto-udp-enttec.h"
 #include "proto-udp-a2s.h"
+#include "proto-udp-plex.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -879,6 +880,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {3478, PROTO_STUN, stun_probe_prepare, NULL, stun_probe_classify},
     {3702, PROTO_ONVIF, onvif_probe_prepare, NULL, onvif_probe_classify},
     {34964, PROTO_NONE, epm_probe_prepare, NULL, epm_probe_classify},
+    {32414, PROTO_PLEX, plex_probe_prepare, plex_probe_classify},
 #endif
     {0, PROTO_NONE, 0, 0}
 };
@@ -949,6 +951,25 @@ udp_probe_classify_target(unsigned port, const unsigned char *response,
 }
 
 #ifdef UDP_EXTENDED_PROBES
+static int
+plex_fixture_case(const char *original, const char *needle, const char *replacement,
+                   int expected)
+{
+    char changed[4097];
+    const char *position = strstr(original, needle);
+    size_t prefix, suffix, inserted = strlen(replacement), length;
+    if (!position) return 0;
+    prefix = (size_t)(position - original);
+    suffix = strlen(position + strlen(needle));
+    length = prefix + inserted + suffix;
+    if (length >= sizeof(changed)) return 0;
+    memcpy(changed, original, prefix);
+    memcpy(changed + prefix, replacement, inserted);
+    memcpy(changed + prefix + inserted, position + strlen(needle), suffix);
+    return (udp_probe_classify(32414, (const unsigned char *)changed,
+            (unsigned)length, 0) == PROTO_PLEX) == expected;
+}
+
 static int
 onvif_fixture_case(const char *original, const char *needle, const char *replacement,
                    int expected, uint64_t cookie, const struct UdpProbeTarget *target)
@@ -1198,6 +1219,56 @@ udp_probe_catalog_selftest(void)
         }
     }
 #ifdef UDP_EXTENDED_PROBES
+    {
+        static const char reply[] = "HTTP/1.0 200 OK\r\nContent-Type: plex/media-server\r\nName: Test Server\r\nResource-Identifier: test-server-1\r\nPort: 32400\r\nVersion: 1.0-test\r\n\r\n";
+        if (udp_probe_classify(32414, (const unsigned char *)reply, sizeof(reply) - 1, cookie) != PROTO_PLEX) return 1;
+        {
+            static const char xml_reply[] = "HTTP/1.0 200 OK\r\nContent-Type: plex/media-server\r\nName: Test\r\nResource-Identifier: test-1\r\nContent-Length: 18\r\n\r\n<PlexMediaServer/>";
+            if (udp_probe_classify(32414, (const unsigned char *)xml_reply, sizeof(xml_reply) - 1, cookie) != PROTO_PLEX) return 1;
+            if (!plex_fixture_case(xml_reply, "Length: 18", "Length: 17", 0) ||
+                !plex_fixture_case(xml_reply, "Length: 18", "Length: 19", 0) ||
+                !plex_fixture_case(xml_reply, "<PlexMediaServer/>", "<OtherMediaRoot/>", 0) ||
+                !plex_fixture_case(xml_reply, "<PlexMediaServer/>", "<PlexMediaServer>", 0)) return 1;
+        }
+        {
+            unsigned j;
+            char with_body[1024];
+            static const char *bodies[] = {
+                "<!DOCTYPE PlexMediaServer><PlexMediaServer/>",
+                "<PlexMediaServer/><PlexMediaServer/>",
+                "<PlexMediaServer/>garbage",
+                "<PlexMediaServer xmlns='unrelated'/>",
+                "<!DOCTYPE PlexMediaServer [<!ENTITY x SYSTEM 'file:///unavailable'>]><PlexMediaServer>&x;</PlexMediaServer>"
+            };
+            if (!udp_probe_prepare(32414, cookie, NULL, &result) || result.length != 23 ||
+                memcmp(result.payload, "M-SEARCH * HTTP/1.1\r\n\r\n", 23)) return 1;
+            for (j = 0; j < sizeof(reply) - 1; j++)
+                if (udp_probe_classify(32414, (const unsigned char *)reply, j, cookie) != PROTO_NONE) return 1;
+            if (!plex_fixture_case(reply, "Content-Type", "cOnTeNt-TyPe", 1) ||
+                !plex_fixture_case(reply, "plex/media-server", "plex/media-player", 0) ||
+                !plex_fixture_case(reply, "Name: Test Server", "Name: ", 0) ||
+                !plex_fixture_case(reply, "Name: Test Server", "Name: 测试服务器", 1) ||
+                !plex_fixture_case(reply, "Name: Test Server", "Name: \xc0\x80", 0) ||
+                !plex_fixture_case(reply, "Resource-Identifier: test-server-1", "Other: test-server-1", 0) ||
+                !plex_fixture_case(reply, "test-server-1", "bad id", 0) ||
+                !plex_fixture_case(reply, "Port: 32400\r\n", "", 1) ||
+                !plex_fixture_case(reply, "Port: 32400", "Port: 0", 0) ||
+                !plex_fixture_case(reply, "Port: 32400", "Port: 65536", 0) ||
+                !plex_fixture_case(reply, "Port: 32400", "Port: 32400x", 0) ||
+                !plex_fixture_case(reply, "Version: 1.0-test\r\n", "", 1) ||
+                !plex_fixture_case(reply, "Version: 1.0-test", "Name: duplicate", 0) ||
+                !plex_fixture_case(reply, "Version: 1.0-test", "Content-Length: 0", 1) ||
+                !plex_fixture_case(reply, "Version: 1.0-test", "Content-Length: 42949672960", 0) ||
+                !plex_fixture_case(reply, "Version: 1.0-test", "Unknown: ok", 1)) return 1;
+            for (j = 0; j < sizeof(bodies) / sizeof(bodies[0]); j++) {
+                int n = snprintf(with_body, sizeof(with_body),
+                    "HTTP/1.0 200 OK\r\nContent-Type: plex/media-server\r\nName: Test\r\nResource-Identifier: test\r\nContent-Length: %u\r\n\r\n%s",
+                    (unsigned)strlen(bodies[j]), bodies[j]);
+                if (n < 0 || (unsigned)n >= sizeof(with_body) ||
+                    udp_probe_classify(32414, (const unsigned char *)with_body, (unsigned)n, cookie) != PROTO_NONE) return 1;
+            }
+        }
+    }
     {
         struct UdpProbeTarget target;
         unsigned char reply[300] = {0};
