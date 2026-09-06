@@ -6,6 +6,7 @@
 #include "proto-udp-ssdp.h"
 #include "proto-udp-openvpn.h"
 #include "proto-udp-runtime.h"
+#include "proto-udp-dht.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -850,6 +851,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {1900, PROTO_SSDP, ssdp_probe_prepare, ssdp_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
+    {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
 #endif
     {0, PROTO_NONE, 0, 0}
 };
@@ -934,6 +936,57 @@ udp_probe_catalog_selftest(void)
     unsigned i;
 
 #ifdef UDP_EXTENDED_PROBES
+    {
+        static const unsigned char reply[] = "d1:rd2:id20:abcdefghij0123456789e1:t4:\x89\xab\xcd\xef" "1:y1:re";
+        if (udp_probe_classify(6881, reply, sizeof(reply) - 1, cookie) != PROTO_DHT) return 1;
+        {
+            static const struct {const char *text; int valid;} cases[] = {
+                {"d1:eli201e5:errore1:t4:abcd1:y1:ee", 1},
+                {"d1:eli204e0:e1:t4:abcd1:y1:ee", 1},
+                {"d1:eli205e5:errore1:t4:abcd1:y1:ee", 0},
+                {"d1:eli0201e5:errore1:t4:abcd1:y1:ee", 0},
+                {"d1:eli201e5:errori1ee1:t4:abcd1:y1:ee", 0},
+                {"d1:eli9223372036854775808e5:errore1:t4:abcd1:y1:ee", 0},
+                {"d1:rd2:id20:abcdefghij0123456789e1:t4:abcd1:y1:r1:zi-9223372036854775808ee", 1},
+                {"d1:rd2:id20:abcdefghij0123456789e1:t4:abcd1:y1:r1:zi-0ee", 0},
+                {"d1:rd2:id20:abcdefghij0123456789e1:t4:abcd1:t4:abcd1:y1:re", 0},
+                {"d1:rd2:id20:abcdefghij0123456789e1:t4:abcd1:y1:q e", 0},
+                {"d1:rd2:id19:abcdefghij012345678e1:t4:abcd1:y1:re", 0},
+                {"d1:rd2:id21:abcdefghij01234567890e1:t4:abcd1:y1:re", 0},
+                {"d1:rd2:id20:abcdefghij0123456789e1:t4:abcd1:y1:r1:z999999999999999999999:x e", 0},
+                {"d1:rd2:id20:abcdefghij0123456789e1:t4:abcd1:y1:r1:zlllllllllleeeeeeeeeeee", 0},
+                {"d1:rd2:id20:abcdefghij0123456789e1:y1:r1:t4:abcde", 0},
+                {"d1:rd2:id20:abcdefghij0123456789e1:t04:abcd1:y1:re", 0}
+            };
+            struct UdpPreparedProbe second;
+            unsigned char altered[sizeof(reply)];
+            for (i = 0; i < sizeof(reply) - 1; i++)
+                if (udp_probe_classify(6881, reply, i, cookie) != PROTO_NONE) return 1;
+            if (udp_probe_classify(6881, reply, sizeof(reply), cookie) != PROTO_NONE ||
+                udp_probe_classify(6881, reply, sizeof(reply) - 1, cookie ^ 1) != PROTO_NONE) return 1;
+            for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+                if ((udp_probe_classify(6881, (const unsigned char *)cases[i].text,
+                     (unsigned)strlen(cases[i].text), 0x61626364) == PROTO_DHT) != cases[i].valid) {
+                    fprintf(stderr, "DHT response case %u failed\n", i);
+                    return 1;
+                }
+            if (!udp_probe_runtime_init() || !udp_probe_prepare(6881, cookie, NULL, &result) ||
+                result.length != 58 || memcmp(result.payload, "d1:ad2:id20:", 12) ||
+                memcmp(result.payload + 32, "e1:q4:ping1:t4:\x89\xab\xcd\xef" "1:y1:qe", 26)) {
+                fprintf(stderr, "DHT request encoding failed (length %u)\n", result.length);
+                return 1;
+            }
+            if (!udp_probe_prepare(6881, cookie ^ 1, NULL, &second) ||
+                memcmp(result.payload + 12, second.payload + 12, 20)) return 1;
+            memcpy(altered, reply, sizeof(reply));
+            /* A transaction may contain zero bytes, unlike a C string. */
+            {
+                unsigned offset = (unsigned)(strstr((const char *)reply, "1:t4:") - (const char *)reply) + 5;
+                memset(altered + offset, 0, 4);
+                if (udp_probe_classify(6881, altered, sizeof(reply) - 1, 0) != PROTO_DHT) return 1;
+            }
+        }
+    }
     {
         unsigned char reply[26] = {0x40, 1, 2, 3, 4, 5, 6, 7, 8, 1};
         if (!udp_probe_runtime_init()) return 1;

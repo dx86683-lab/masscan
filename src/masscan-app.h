@@ -66,6 +66,7 @@ enum ApplicationProtocol {
     PROTO_BACNET,
     PROTO_SSDP,
     PROTO_OPENVPN,
+    PROTO_DHT,
 
     PROTO_end_of_list /* must be last one */
 };
