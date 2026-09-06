@@ -64,6 +64,7 @@ enum ApplicationProtocol {
     PROTO_MDNS,
     PROTO_SQL_BROWSER,
     PROTO_BACNET,
+    PROTO_SSDP,
 
     PROTO_end_of_list /* must be last one */
 };

@@ -3,6 +3,7 @@
 #include "proto-udp-snmpv3.h"
 #include "proto-udp-mdns.h"
 #include "proto-udp-sqlr.h"
+#include "proto-udp-ssdp.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -844,6 +845,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {5353, PROTO_MDNS, mdns_probe_prepare, mdns_probe_classify},
     {1434, PROTO_SQL_BROWSER, sqlr_probe_prepare, sqlr_probe_classify},
     {47808, PROTO_BACNET, bacnet_prepare, bacnet_classify},
+    {1900, PROTO_SSDP, ssdp_probe_prepare, ssdp_probe_classify},
     {0, PROTO_NONE, 0, 0}
 };
 
@@ -970,6 +972,72 @@ udp_probe_catalog_selftest(void)
             if (udp_probe_classify(47808, altered, 28, cookie) != PROTO_NONE) return 1;
             altered[11] = 0;
             if (udp_probe_classify(47808, altered, 28, cookie) != PROTO_NONE) return 1;
+        }
+    }
+    {
+        static const unsigned char reply[] =
+            "HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age=1800\r\nEXT:\r\n"
+            "LOCATION: http://192.0.2.1/device.xml\r\nSERVER: Test/1 UPnP/1.0 Product/1\r\n"
+            "ST: upnp:rootdevice\r\nUSN: uuid:12345678-1234-1234-1234-123456789abc::upnp:rootdevice\r\n\r\n";
+        if (udp_probe_classify(1900, reply, sizeof(reply) - 1, cookie) != PROTO_SSDP) return 1;
+        {
+            static const struct {const char *field; const char *line; int valid;} cases[] = {
+                {"CACHE-CONTROL:", "cache-control: max-age=1, private, x=\"a,b\"", 1},
+                {"CACHE-CONTROL:", "CACHE-CONTROL: max-age=1, max-age=2", 0},
+                {"CACHE-CONTROL:", "CACHE-CONTROL: max-age=-1", 0},
+                {"CACHE-CONTROL:", "CACHE-CONTROL: max-age=4294967296", 0},
+                {"CACHE-CONTROL:", "CACHE-CONTROL: private", 0},
+                {"EXT:", "OTHER:", 0},
+                {"EXT:", "EXT: text", 0},
+                {"LOCATION:", "LOCATION: HTTP://example.test/device.xml", 1},
+                {"LOCATION:", "LOCATION: http://[2001:db8::1]:8080/device%20name.xml?x=1", 1},
+                {"LOCATION:", "LOCATION: http://[not-ip]/", 0},
+                {"LOCATION:", "LOCATION: http://user@host/", 0},
+                {"LOCATION:", "LOCATION: http:///missing", 0},
+                {"LOCATION:", "LOCATION: http://host:65536/", 0},
+                {"LOCATION:", "LOCATION: http://host:0/", 0},
+                {"LOCATION:", "LOCATION: http://host/%zz", 0},
+                {"LOCATION:", "LOCATION: http://host/#fragment", 0},
+                {"LOCATION:", "LOCATION: file:///device.xml", 0},
+                {"SERVER:", "SERVER: Test/1 UPnP/2.0 Product/1", 0},
+                {"SERVER:", "SERVER: Test/1 UPnP/2.0 Product/1\r\nBOOTID.UPNP.ORG: 1", 1},
+                {"SERVER:", "SERVER: Test/1 UPnP/1.1 Product/1\r\nBOOTID.UPNP.ORG: 0", 1},
+                {"SERVER:", "SERVER: Test/1 UPnP/2.0 Product/1\r\nBOOTID.UPNP.ORG: 2147483648", 0},
+                {"ST:", "ST: ssdp:all", 0},
+                {"ST:", "ST: upnp:rootdevice\r\nST: upnp:rootdevice", 0},
+                {"ST:", "ST: upnp:rootdevice\r\nX-Extension: yes", 1},
+                {"ST:", "ST: upnp:rootdevice\r\nCONFIGID.UPNP.ORG: 16777216", 0},
+                {"ST:", "ST: upnp:rootdevice\r\nSEARCHPORT.UPNP.ORG: 65535", 1},
+                {"USN:", "USN: uuid:12345678-1234-1234-1234-123456789abz::upnp:rootdevice", 0},
+                {"USN:", "USN: uuid:12345678-1234-1234-1234-123456789abc", 0}
+            };
+            unsigned char altered[1400];
+            struct UdpProbeTarget target = {0};
+            static const char request[] = "M-SEARCH * HTTP/1.1\r\nHOST: 192.0.2.1:1900\r\n"
+                "MAN: \"ssdp:discover\"\r\nST: upnp:rootdevice\r\n\r\n";
+            target.destination.version = 4;
+            target.destination.ipv4 = 0xc0000201;
+            if (udp_probe_prepare(1900, cookie, NULL, &result) ||
+                !udp_probe_prepare(1900, cookie, &target, &result) ||
+                result.length != sizeof(request) - 1 || memcmp(result.payload, request, result.length)) return 1;
+            for (i = 0; i < sizeof(reply) - 1; i++)
+                if (udp_probe_classify(1900, reply, i, cookie) != PROTO_NONE) return 1;
+            if (udp_probe_classify(1900, reply, sizeof(reply), cookie) != PROTO_NONE) return 1;
+            for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+                const char *begin = strstr((const char *)reply, cases[i].field);
+                const char *end = strstr(begin, "\r\n");
+                unsigned prefix = (unsigned)(begin - (const char *)reply);
+                unsigned replacement = (unsigned)strlen(cases[i].line);
+                unsigned suffix = (unsigned)strlen(end);
+                memcpy(altered, reply, prefix);
+                memcpy(altered + prefix, cases[i].line, replacement);
+                memcpy(altered + prefix + replacement, end, suffix);
+                if ((udp_probe_classify(1900, altered, prefix + replacement + suffix, cookie) == PROTO_SSDP)
+                    != cases[i].valid) return 1;
+            }
+            memcpy(altered, reply, sizeof(reply) - 1);
+            altered[15] = '\n';
+            if (udp_probe_classify(1900, altered, sizeof(reply) - 1, cookie) != PROTO_NONE) return 1;
         }
     }
     {
