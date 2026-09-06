@@ -712,6 +712,46 @@ ipmsg_classify(const unsigned char *response, unsigned length, uint64_t cookie)
     return offset < length - 1;
 }
 
+static int
+enip_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+              struct UdpPreparedProbe *result)
+{
+    (void)cookie;
+    (void)target;
+    memset(result->payload, 0, 24);
+    result->payload[0] = 0x63;
+    result->length = 24;
+    return 1;
+}
+
+static int
+enip_classify(const unsigned char *response, unsigned length, uint64_t cookie)
+{
+    unsigned offset = 26, count, i, found = 0;
+    (void)cookie;
+    if (length < 26 || response[0] != 0x63 || response[1] != 0 ||
+        ((unsigned)response[3] << 8 | response[2]) != length - 24) return 0;
+    for (i = 4; i < 24; i++)
+        if (response[i] != 0) return 0;
+    count = (unsigned)response[25] << 8 | response[24];
+    for (i = 0; i < count; i++) {
+        unsigned type, size;
+        if (length - offset < 4) return 0;
+        type = (unsigned)response[offset + 1] << 8 | response[offset];
+        size = (unsigned)response[offset + 3] << 8 | response[offset + 2];
+        offset += 4;
+        if (size > length - offset) return 0;
+        if (type == 12) {
+            if (size < 34 || response[offset] != 1 || response[offset + 1] != 0 ||
+                response[offset + 2] != 0 || response[offset + 3] != 2 ||
+                (unsigned)response[offset + 32] + 34 != size) return 0;
+            found = 1;
+        }
+        offset += size;
+    }
+    return found && offset == length;
+}
+
 static const struct UdpProbeSpec udp_probe_catalog[] = {
     {80, PROTO_QUIC, quic_prepare, quic_classify},
     {443, PROTO_QUIC, quic_prepare, quic_classify},
@@ -734,6 +774,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {7001, PROTO_AFS, afs_prepare, afs_classify},
     {2123, PROTO_GTPC, gtpc_prepare, gtpc_classify},
     {2425, PROTO_IPMSG, ipmsg_prepare, ipmsg_classify},
+    {44818, PROTO_ENIP, enip_prepare, enip_classify},
     {0, PROTO_NONE, 0, 0}
 };
 
@@ -816,6 +857,56 @@ udp_probe_catalog_selftest(void)
     };
     unsigned i;
 
+    {
+        unsigned char reply[70] = {0};
+        reply[0] = 0x63;
+        reply[2] = 41;
+        reply[24] = 1;
+        reply[26] = 12;
+        reply[28] = 35;
+        reply[30] = 1;
+        reply[33] = 2;
+        reply[62] = 1;
+        reply[63] = 'x';
+        if (udp_probe_classify(44818, reply, 65, cookie) != PROTO_ENIP)
+            return 1;
+        for (i = 0; i < 65; i++)
+            if (udp_probe_classify(44818, reply, i, cookie) != PROTO_NONE) return 1;
+        if (udp_probe_classify(44818, reply, 66, cookie) != PROTO_NONE) return 1;
+        reply[12] = 1;
+        if (udp_probe_classify(44818, reply, 65, cookie) != PROTO_NONE) return 1;
+        reply[12] = 0;
+        reply[8] = 1;
+        if (udp_probe_classify(44818, reply, 65, cookie) != PROTO_NONE) return 1;
+        reply[8] = 0;
+        reply[62] = 2;
+        if (udp_probe_classify(44818, reply, 65, cookie) != PROTO_NONE) return 1;
+        reply[62] = 0;
+        reply[28] = 34;
+        reply[2] = 40;
+        if (udp_probe_classify(44818, reply, 64, cookie) != PROTO_ENIP) return 1;
+        reply[62] = 1;
+        reply[28] = 35;
+        reply[2] = 41;
+        reply[32] = 2;
+        reply[33] = 0;
+        if (udp_probe_classify(44818, reply, 65, cookie) != PROTO_NONE) return 1;
+        reply[32] = 0;
+        reply[33] = 2;
+        reply[2] = 46;
+        reply[24] = 2;
+        memcpy(reply + 65, "\x22\x00\x01\x00\x01", 5);
+        if (udp_probe_classify(44818, reply, 70, cookie) != PROTO_ENIP) return 1;
+        reply[26] = 22;
+        if (udp_probe_classify(44818, reply, 70, cookie) != PROTO_NONE) return 1;
+        reply[26] = 12;
+        reply[67] = 2;
+        if (udp_probe_classify(44818, reply, 70, cookie) != PROTO_NONE) return 1;
+        if (!udp_probe_prepare(44818, cookie, NULL, &result) || result.length != 24 ||
+            result.payload[0] != 0x63) return 1;
+        for (i = 1; i < 24; i++)
+            if (result.payload[i] != 0) return 1;
+    }
     {
         static const unsigned char reply[] = "1:42:node:host:65:IP Messenger 5.0";
         if (udp_probe_classify(2425, reply, sizeof(reply), cookie) != PROTO_IPMSG)
