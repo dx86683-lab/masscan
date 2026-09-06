@@ -76,6 +76,7 @@ enum ApplicationProtocol {
     PROTO_ONVIF,
     PROTO_EPM,
     PROTO_PNIO,
+    PROTO_KNX,
 
     PROTO_end_of_list /* must be last one */
 };

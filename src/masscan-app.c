@@ -78,6 +78,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_ONVIF:            return "onvif";
     case PROTO_EPM:              return "epm";
     case PROTO_PNIO:             return "pnio";
+    case PROTO_KNX:              return "knx";
         
     case PROTO_ERROR:           return "error";
             
@@ -162,6 +163,7 @@ masscan_string_to_app(const char *str)
         {"onvif",       PROTO_ONVIF},
         {"epm",         PROTO_EPM},
         {"pnio",        PROTO_PNIO},
+        {"knx",         PROTO_KNX},
         {0,0}
     };
     size_t i;
@@ -214,6 +216,7 @@ masscan_app_selftest(void) {
         {PROTO_ONVIF, 65},
         {PROTO_EPM, 66},
         {PROTO_PNIO, 67},
+        {PROTO_KNX, 68},
         {0,0}
     };
     size_t i;

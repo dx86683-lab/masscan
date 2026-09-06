@@ -15,6 +15,7 @@
 #include "proto-udp-stun.h"
 #include "proto-udp-onvif.h"
 #include "proto-udp-epm.h"
+#include "proto-udp-knx.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -860,6 +861,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {47808, PROTO_BACNET, bacnet_prepare, bacnet_classify},
     {1900, PROTO_SSDP, ssdp_probe_prepare, ssdp_probe_classify},
     {1701, PROTO_L2TP, l2tp_probe_prepare, l2tp_probe_classify},
+    {3671, PROTO_KNX, knx_probe_prepare, knx_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
     {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
@@ -965,6 +967,58 @@ udp_probe_catalog_selftest(void)
 {
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
+    {
+        static const unsigned char reply[] =
+            "\x06\x10\x02\x0c\x00\x48\x08\x01\xc0\x00\x02\x01\x0e\x57"
+            "\x36\x01\x02\x00\x11\x01\x00\x01\x00\x01\x02\x03\x04\x05\xe0\x00\x17\x0c\x02\x00\x00\x00\x00\x01"
+            "KNX test\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+            "\x04\x02\x02\x02";
+        if (udp_probe_classify(3671, reply, sizeof(reply) - 1, cookie) != PROTO_KNX) return 1;
+        {
+            unsigned char changed[100];
+            unsigned j;
+            if (!udp_probe_prepare(3671, cookie, NULL, &result) || result.length != 18 ||
+                memcmp(result.payload, "\x06\x10\x02\x0b\x00\x12\x08\x01\x00\x00\x00\x00\x00\x00\x04\x84\x02\x01", 18)) return 1;
+            for (j = 0; j < sizeof(reply) - 1; j++)
+                if (udp_probe_classify(3671, reply, j, cookie) != PROTO_NONE) return 1;
+            memcpy(changed, reply, 72);
+            changed[5] = 74; changed[72] = 2; changed[73] = 128;
+            if (udp_probe_classify(3671, changed, 74, cookie) != PROTO_KNX) return 1;
+            changed[73] = 3;
+            if (udp_probe_classify(3671, changed, 74, cookie) != PROTO_NONE) return 1;
+            for (j = 0; j < 8; j++) {
+                memcpy(changed, reply, 72); changed[j] ^= 0x80;
+                if (udp_probe_classify(3671, changed, 72, cookie) != PROTO_NONE) return 1;
+            }
+            memcpy(changed, reply, 72);
+            memcpy(changed + 14, reply + 68, 4); memcpy(changed + 18, reply + 14, 54);
+            if (udp_probe_classify(3671, changed, 72, cookie) != PROTO_KNX) return 1;
+            memcpy(changed, reply, 72); memset(changed + 38, 0xe9, 30);
+            changed[8] = 10;
+            if (udp_probe_classify(3671, changed, 72, cookie) != PROTO_KNX) return 1;
+            memset(changed + 8, 0, 4);
+            if (udp_probe_classify(3671, changed, 72, cookie) != PROTO_NONE) return 1;
+            memset(changed + 12, 0, 2);
+            if (udp_probe_classify(3671, changed, 72, cookie) != PROTO_KNX) return 1;
+            memcpy(changed, reply, 72); changed[5] = 76;
+            memcpy(changed + 72, reply + 68, 4);
+            if (udp_probe_classify(3671, changed, 76, cookie) != PROTO_NONE) return 1;
+            changed[73] = 254;
+            if (udp_probe_classify(3671, changed, 76, cookie) != PROTO_KNX) return 1;
+            memcpy(changed, reply, 72); changed[5] = 68;
+            if (udp_probe_classify(3671, changed, 68, cookie) != PROTO_NONE) return 1;
+            memcpy(changed, reply, 72); changed[5] = 74; changed[68] = 6;
+            changed[72] = 2; changed[73] = 1;
+            if (udp_probe_classify(3671, changed, 74, cookie) != PROTO_NONE) return 1;
+            changed[72] = 4;
+            if (udp_probe_classify(3671, changed, 74, cookie) != PROTO_KNX) return 1;
+            memcpy(changed, reply, 72); changed[5] = 80;
+            memcpy(changed + 72, "\x08\x08\x00\x00\x00\x0f\x09\x1a", 8);
+            if (udp_probe_classify(3671, changed, 80, cookie) != PROTO_KNX) return 1;
+            changed[72] = 7;
+            if (udp_probe_classify(3671, changed, 80, cookie) != PROTO_NONE) return 1;
+        }
+    }
     unsigned char version_negotiation[31] = {
         0xc0, 0x00, 0x00, 0x00, 0x00,
         0x08, 0xff, 0xff, 0xff, 0xff, 0x76, 0x54, 0x32, 0x10,
