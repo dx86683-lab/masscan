@@ -16,6 +16,7 @@
 #include "proto-udp-onvif.h"
 #include "proto-udp-epm.h"
 #include "proto-udp-knx.h"
+#include "proto-udp-slmp.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -862,6 +863,8 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {1900, PROTO_SSDP, ssdp_probe_prepare, ssdp_probe_classify},
     {1701, PROTO_L2TP, l2tp_probe_prepare, l2tp_probe_classify},
     {3671, PROTO_KNX, knx_probe_prepare, knx_probe_classify},
+    {5006, PROTO_SLMP, slmp_probe_prepare, slmp_probe_classify},
+    {5007, PROTO_SLMP, slmp_probe_prepare, slmp_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
     {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
@@ -967,6 +970,36 @@ udp_probe_catalog_selftest(void)
 {
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
+    {
+        static const unsigned char reply[] =
+            "\xd4\x00\x34\x12\x00\x00\x00\xff\xff\x03\x00\x14\x00\x00\x00"
+            "Q02UCPU         \x63\x02";
+        if (udp_probe_classify(5007, reply, sizeof(reply) - 1, 0x1234) != PROTO_SLMP) return 1;
+        {
+            unsigned j, port;
+            unsigned char changed[34];
+            for (port = 5006; port <= 5007; port++) {
+                if (!udp_probe_prepare(port, 0x1234, NULL, &result) || result.length != 19 ||
+                    memcmp(result.payload, "\x54\x00\x34\x12\x00\x00\x00\xff\xff\x03\x00\x06\x00\x04\x00\x01\x01\x00\x00", 19)) return 1;
+                if (udp_probe_classify(port, reply, 33, 0x1234) != PROTO_SLMP) return 1;
+                for (j = 0; j < 33; j++)
+                    if (udp_probe_classify(port, reply, j, 0x1234) != PROTO_NONE) return 1;
+                for (j = 0; j < 15; j++) {
+                    memcpy(changed, reply, 33); changed[j] ^= 1;
+                    if (udp_probe_classify(port, changed, 33, 0x1234) != PROTO_NONE) return 1;
+                }
+                if (udp_probe_classify(port, reply, 33, 0x1235) != PROTO_NONE) return 1;
+                memcpy(changed, reply, 33); changed[33] = 0;
+                if (udp_probe_classify(port, changed, 34, 0x1234) != PROTO_NONE) return 1;
+                memset(changed + 15, ' ', 16);
+                if (udp_probe_classify(port, changed, 33, 0x1234) != PROTO_NONE) return 1;
+                memset(changed + 15, 'A', 16); changed[31] = changed[32] = 255;
+                if (udp_probe_classify(port, changed, 33, 0x1234) != PROTO_SLMP) return 1;
+                changed[30] = 0;
+                if (udp_probe_classify(port, changed, 33, 0x1234) != PROTO_NONE) return 1;
+            }
+        }
+    }
     {
         static const unsigned char reply[] =
             "\x06\x10\x02\x0c\x00\x48\x08\x01\xc0\x00\x02\x01\x0e\x57"
