@@ -92,6 +92,8 @@ enum ApplicationProtocol {
     PROTO_SQL_ANYWHERE,
     PROTO_HIFLY,
     PROTO_HID,
+    PROTO_GARDASOFT,
+    PROTO_GARDASOFT_VERSION,
 
     PROTO_end_of_list /* must be last one */
 };

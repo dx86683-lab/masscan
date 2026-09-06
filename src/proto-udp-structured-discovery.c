@@ -229,3 +229,62 @@ hid_probe_classify(const unsigned char *data, unsigned length, uint64_t cookie)
     if (month == 2 && !(year % 4) && ((year % 100) || !(year % 400))) days++;
     return day && day <= days;
 }
+
+int
+gardasoft_probe_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+                       struct UdpPreparedProbe *result)
+{
+    (void)cookie; (void)target;
+    memcpy(result->payload, "Gardasoft Search", 16);
+    result->length = 16;
+    return 1;
+}
+
+int
+gardasoft_probe_classify(const unsigned char *data, unsigned length, uint64_t cookie)
+{
+    unsigned offset, i;
+    (void)cookie;
+    if (length == 44 && !memcmp(data, "Gardasoft,PP420,", 16)) offset = 16;
+    else if (length == 47 && !memcmp(data, "Gardasoft,TR-RC120,", 19)) offset = 19;
+    else return 0;
+    for (i = 0; i < 6; i++) if (data[offset + i] < '0' || data[offset + i] > '9') return 0;
+    offset += 6;
+    if (data[offset] != ',' || !discovery_mac_text(data + offset + 1, 12) || data[offset + 13] != ',') return 0;
+    offset += 14;
+    for (i = 0; i < 8; i++) if (discovery_hex(data[offset + i]) < 0) return 0;
+    return 1;
+}
+
+int
+gardasoft_version_probe_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+                               struct UdpPreparedProbe *result)
+{
+    (void)cookie; (void)target;
+    memcpy(result->payload, "VR\r", 3);
+    result->length = 3;
+    return 1;
+}
+
+int
+gardasoft_version_probe_classify(const unsigned char *data, unsigned length, uint64_t cookie)
+{
+    unsigned start = 0, end = length, i;
+    (void)cookie;
+    if (!length || length > 256) return 0;
+    while (start < end && (data[start] == '\r' || data[start] == '\n')) start++;
+    if (end - start >= 3 && !memcmp(data + start, "VR", 2) &&
+        (data[start + 2] == '\r' || data[start + 2] == '\n')) {
+        start += 3;
+        while (start < end && (data[start] == '\r' || data[start] == '\n')) start++;
+    }
+    while (end > start && (data[end - 1] == '\r' || data[end - 1] == '\n')) end--;
+    if (end == start || data[--end] != '>') return 0;
+    while (end > start && (data[end - 1] == '\r' || data[end - 1] == '\n')) end--;
+    if (end - start != 18 || memcmp(data + start, "PP420 (HW", 9) ||
+        memcmp(data + start + 12, ") V", 3)) return 0;
+    for (i = 0; i < 3; i++)
+        if (data[start + 9 + i] < '0' || data[start + 9 + i] > '9' ||
+            data[start + 15 + i] < '0' || data[start + 15 + i] > '9') return 0;
+    return 1;
+}

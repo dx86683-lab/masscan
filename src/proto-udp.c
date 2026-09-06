@@ -126,7 +126,8 @@ handle_udp(struct Output *out, time_t timestamp,
             probe_protocol == PROTO_SBUS || probe_protocol == PROTO_LANTRONIX ||
             probe_protocol == PROTO_DB2 || probe_protocol == PROTO_MOXA ||
             probe_protocol == PROTO_DIGI || probe_protocol == PROTO_SQL_ANYWHERE ||
-            probe_protocol == PROTO_HIFLY || probe_protocol == PROTO_HID) {
+            probe_protocol == PROTO_HIFLY || probe_protocol == PROTO_HID ||
+            probe_protocol == PROTO_GARDASOFT || probe_protocol == PROTO_GARDASOFT_VERSION) {
             banner_data = (const unsigned char *)"discovery-response";
             banner_length = 18;
         }
@@ -490,7 +491,9 @@ proto_udp_selftest(void)
                 "\x00\x00\x01\x01\x00\x04\x00\x05\x00\x05\x00\x03" "db\x00"
                 "\x01\x02\x0a\x4e\x03\x01\x02\x04\x08\x00\x00\x00\x00\x00\x00\x00\x00\x07\x02\x04\xb1"},
             {48899, 35, PROTO_HIFLY, "192.0.2.10,020000000001,TEST-MODULE"},
-            {4070, 87, PROTO_HID, "discovered;087;00-06-8E-12-34-56;VertXController;192.0.2.1;2;V2000;2.2.7.18;02/27/2007;"}
+            {4070, 87, PROTO_HID, "discovered;087;00-06-8E-12-34-56;VertXController;192.0.2.1;2;V2000;2.2.7.18;02/27/2007;"},
+            {30311, 44, PROTO_GARDASOFT, "Gardasoft,PP420,000001,000B75000001,C0000201"},
+            {30313, 19, PROTO_GARDASOFT_VERSION, "PP420 (HW001) V002>"}
         };
         unsigned f;
         for (f = 0; f < sizeof(fixtures) / sizeof(*fixtures); f++) {

@@ -885,6 +885,8 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {2638, PROTO_SQL_ANYWHERE, sql_anywhere_probe_prepare, sql_anywhere_probe_classify},
     {48899, PROTO_HIFLY, hifly_probe_prepare, hifly_probe_classify},
     {4070, PROTO_HID, hid_probe_prepare, hid_probe_classify},
+    {30311, PROTO_GARDASOFT, gardasoft_probe_prepare, gardasoft_probe_classify},
+    {30313, PROTO_GARDASOFT_VERSION, gardasoft_version_probe_prepare, gardasoft_version_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
     {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
@@ -1026,6 +1028,43 @@ udp_probe_catalog_selftest(void)
 {
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
+    {
+        static const char discovery[] = "Gardasoft,PP420,000001,000B75000001,C0000201";
+        static const char version[] = "PP420 (HW001) V002>";
+        unsigned n;
+        if (udp_probe_classify(30311, (const unsigned char *)discovery, sizeof(discovery) - 1, cookie) != PROTO_GARDASOFT ||
+            udp_probe_classify(30313, (const unsigned char *)version, sizeof(version) - 1, cookie) != PROTO_GARDASOFT_VERSION) {
+            fprintf(stderr, "gardasoft: complete reply rejected\n"); return 1;
+        }
+        if (!udp_probe_prepare(30311, cookie, NULL, &result) || result.length != 16 ||
+            memcmp(result.payload, "Gardasoft Search", 16)) return 1;
+        if (!udp_probe_prepare(30313, cookie, NULL, &result) || result.length != 3 ||
+            memcmp(result.payload, "VR\r", 3)) return 1;
+        for (n = 0; n < sizeof(discovery) - 1; n++)
+            if (udp_probe_classify(30311, (const unsigned char *)discovery, n, cookie) != PROTO_NONE) return 1;
+        for (n = 0; n < sizeof(version) - 1; n++)
+            if (udp_probe_classify(30313, (const unsigned char *)version, n, cookie) != PROTO_NONE) return 1;
+        if (udp_probe_classify(30310, (const unsigned char *)discovery, sizeof(discovery) - 1, cookie) != PROTO_NONE ||
+            udp_probe_classify(30312, (const unsigned char *)version, sizeof(version) - 1, cookie) != PROTO_NONE) return 1;
+        {
+            static const char alternate[] = "Gardasoft,TR-RC120,000001,000B75000001,C0000201";
+            static const char *bad_version[] = {">", "Err 2>", "PP420 (HW001) V00X>", "PP420 (HW001) V002>extra", "VRPP420 (HW001) V002>"};
+            static const unsigned offsets[] = {0, 10, 15, 21, 23, 35};
+            unsigned char changed[64];
+            if (udp_probe_classify(30311, (const unsigned char *)alternate, sizeof(alternate) - 1, cookie) != PROTO_GARDASOFT) return 1;
+            for (n = 0; n < sizeof(offsets) / sizeof(*offsets); n++) {
+                memcpy(changed, discovery, sizeof(discovery)); changed[offsets[n]] = '!';
+                if (udp_probe_classify(30311, changed, sizeof(discovery) - 1, cookie) != PROTO_NONE) return 1;
+            }
+            if (udp_probe_classify(30311, (const unsigned char *)discovery, sizeof(discovery), cookie) != PROTO_NONE) return 1;
+            for (n = 0; n < sizeof(bad_version) / sizeof(*bad_version); n++)
+                if (udp_probe_classify(30313, (const unsigned char *)bad_version[n], (unsigned)strlen(bad_version[n]), cookie) != PROTO_NONE) return 1;
+            {
+                static const char echoed[] = "VR\r\nPP420 (HW001) V002\r\n>\r\n";
+                if (udp_probe_classify(30313, (const unsigned char *)echoed, sizeof(echoed) - 1, cookie) != PROTO_GARDASOFT_VERSION) return 1;
+            }
+        }
+    }
     {
         static const struct {
             unsigned port, length;

@@ -94,6 +94,8 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_SQL_ANYWHERE:     return "sql-anywhere";
     case PROTO_HIFLY:            return "hifly";
     case PROTO_HID:              return "hid";
+    case PROTO_GARDASOFT:        return "gardasoft";
+    case PROTO_GARDASOFT_VERSION:return "gardasoft-version";
         
     case PROTO_ERROR:           return "error";
             
@@ -194,6 +196,8 @@ masscan_string_to_app(const char *str)
         {"sql-anywhere",PROTO_SQL_ANYWHERE},
         {"hifly",       PROTO_HIFLY},
         {"hid",         PROTO_HID},
+        {"gardasoft",   PROTO_GARDASOFT},
+        {"gardasoft-version", PROTO_GARDASOFT_VERSION},
         {0,0}
     };
     size_t i;
@@ -262,6 +266,8 @@ masscan_app_selftest(void) {
         {PROTO_SQL_ANYWHERE, 81},
         {PROTO_HIFLY, 82},
         {PROTO_HID, 83},
+        {PROTO_GARDASOFT, 84},
+        {PROTO_GARDASOFT_VERSION, 85},
         {0,0}
     };
     size_t i;
