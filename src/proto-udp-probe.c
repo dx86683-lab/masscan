@@ -755,6 +755,64 @@ enip_classify(const unsigned char *response, unsigned length, uint64_t cookie)
     return found && offset == length;
 }
 
+static int
+bacnet_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+               struct UdpPreparedProbe *result)
+{
+    (void)cookie;
+    (void)target;
+    memcpy(result->payload, "\x81\x0a\x00\x08\x01\x00\x10\x08", 8);
+    result->length = 8;
+    return 1;
+}
+
+static int
+bacnet_number(const unsigned char *data, unsigned length, unsigned *offset,
+              unsigned tag, uint32_t *value)
+{
+    unsigned size, i;
+    if (*offset >= length || (data[*offset] & 0xf8) != (tag << 4)) return 0;
+    size = data[(*offset)++] & 7;
+    if (size == 0 || size > 4 || size > length - *offset || (tag == 12 && size != 4)) return 0;
+    *value = 0;
+    for (i = 0; i < size; i++) *value = (*value << 8) | data[(*offset)++];
+    return 1;
+}
+
+static int
+bacnet_classify(const unsigned char *data, unsigned length, uint64_t cookie)
+{
+    unsigned control, offset = 6, i;
+    uint32_t value;
+    (void)cookie;
+    if (length < 8 || data[0] != 0x81 || data[1] != 10 ||
+        ((unsigned)data[2] << 8 | data[3]) != length || data[4] != 1) return 0;
+    control = data[5];
+    if (control & 0xd4) return 0;
+    for (i = 0; i < 2; i++) {
+        unsigned size, network;
+        if (!(control & (i == 0 ? 32 : 8))) continue;
+        if (length - offset < 3) return 0;
+        network = (unsigned)data[offset] << 8 | data[offset + 1];
+        size = data[offset + 2];
+        offset += 3;
+        if (size > length - offset || (i && (!size || network == 65535)) ||
+            (!i && network == 65535 && size)) return 0;
+        offset += size;
+    }
+    if (control & 32) {
+        if (offset >= length) return 0;
+        offset++;
+    }
+    if (length - offset < 2 || data[offset++] != 0x10 || data[offset++] != 0) return 0;
+    if (!bacnet_number(data, length, &offset, 12, &value) || value >> 22 != 8 ||
+        (value & 0x3fffff) == 0x3fffff) return 0;
+    if (!bacnet_number(data, length, &offset, 2, &value) || !value || value > 65535) return 0;
+    if (!bacnet_number(data, length, &offset, 9, &value) || value > 3) return 0;
+    if (!bacnet_number(data, length, &offset, 2, &value) || value > 65535) return 0;
+    return offset == length;
+}
+
 static const struct UdpProbeSpec udp_probe_catalog[] = {
     {80, PROTO_QUIC, quic_prepare, quic_classify},
     {443, PROTO_QUIC, quic_prepare, quic_classify},
@@ -785,6 +843,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {1993, PROTO_SNMP, snmpv3_probe_prepare, snmpv3_probe_classify},
     {5353, PROTO_MDNS, mdns_probe_prepare, mdns_probe_classify},
     {1434, PROTO_SQL_BROWSER, sqlr_probe_prepare, sqlr_probe_classify},
+    {47808, PROTO_BACNET, bacnet_prepare, bacnet_classify},
     {0, PROTO_NONE, 0, 0}
 };
 
@@ -867,6 +926,52 @@ udp_probe_catalog_selftest(void)
     };
     unsigned i;
 
+    {
+        static const unsigned char reply[] =
+            "\x81\x0a\x00\x14\x01\x00\x10\x00\xc4\x02\x00\x00\x7b\x22\x05\xc4\x91\x03\x21\x0f";
+        if (udp_probe_classify(47808, reply, sizeof(reply) - 1, cookie) != PROTO_BACNET) return 1;
+        {
+            unsigned char altered[40];
+            static const unsigned offsets[] = {0, 1, 3, 4, 6, 7, 8, 9, 13, 16, 18};
+            if (!udp_probe_prepare(47808, cookie, NULL, &result) || result.length != 8 ||
+                memcmp(result.payload, "\x81\x0a\x00\x08\x01\x00\x10\x08", 8)) return 1;
+            for (i = 0; i < sizeof(reply) - 1; i++)
+                if (udp_probe_classify(47808, reply, i, cookie) != PROTO_NONE) return 1;
+            if (udp_probe_classify(47808, reply, sizeof(reply), cookie) != PROTO_NONE) return 1;
+            for (i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++) {
+                memcpy(altered, reply, 20);
+                altered[offsets[i]] ^= 1;
+                if (udp_probe_classify(47808, altered, 20, cookie) != PROTO_NONE) return 1;
+            }
+            memcpy(altered, reply, 20);
+            altered[5] = 3;
+            if (udp_probe_classify(47808, altered, 20, cookie) != PROTO_BACNET) return 1;
+            altered[5] = 128;
+            if (udp_probe_classify(47808, altered, 20, cookie) != PROTO_NONE) return 1;
+            altered[5] = 0;
+            altered[17] = 4;
+            if (udp_probe_classify(47808, altered, 20, cookie) != PROTO_NONE) return 1;
+            memcpy(altered, reply, 20);
+            altered[18] = 0x23;
+            memcpy(altered + 19, "\x01\x00\x00", 3);
+            altered[3] = 22;
+            if (udp_probe_classify(47808, altered, 22, cookie) != PROTO_NONE) return 1;
+            altered[19] = 0;
+            altered[20] = 255;
+            altered[21] = 255;
+            if (udp_probe_classify(47808, altered, 22, cookie) != PROTO_BACNET) return 1;
+            memcpy(altered, reply, 6);
+            altered[3] = 28;
+            altered[5] = 40;
+            memcpy(altered + 6, "\xff\xff\x00\x00\x01\x01\x07\xff", 8);
+            memcpy(altered + 14, reply + 6, 14);
+            if (udp_probe_classify(47808, altered, 28, cookie) != PROTO_BACNET) return 1;
+            altered[11] = 20;
+            if (udp_probe_classify(47808, altered, 28, cookie) != PROTO_NONE) return 1;
+            altered[11] = 0;
+            if (udp_probe_classify(47808, altered, 28, cookie) != PROTO_NONE) return 1;
+        }
+    }
     {
         static const unsigned char reply[] = "\x05\x4d\x00"
             "ServerName;db;InstanceName;MSSQLSERVER;IsClustered;No;Version;16.0;tcp;1433;;";
