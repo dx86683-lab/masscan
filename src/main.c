@@ -1690,6 +1690,12 @@ int main(int argc, char *argv[])
      * our --excludefile will chop up our pristine 0.0.0.0/0 range into
      * hundreds of subranges. This allows us to grab addresses faster. */
     massip_optimize(&masscan->targets);
+
+    if (masscan->is_udp_probe_experimental && udp_probe_is_registered(69) &&
+        massip_has_port(&masscan->targets, 69 | Templ_UDP) && masscan->targets.count_ports != 1) {
+        fprintf(stderr, "TFTP experimental discovery requires a dedicated UDP/69 scan\n");
+        return 1;
+    }
     
     /* FIXME: we only support 63-bit scans at the current time.
      * This is big enough for the IPv4 Internet, where scanning

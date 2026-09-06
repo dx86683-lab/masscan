@@ -20,6 +20,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 
 /****************************************************************************
@@ -68,6 +69,27 @@ handle_udp(struct Output *out, time_t timestamp,
     unsigned status = 0;
     unsigned is_raw = 0;
     enum ApplicationProtocol probe_protocol = PROTO_NONE;
+    const unsigned char *banner_data = px + parsed->app_offset;
+    unsigned banner_length = parsed->app_length;
+
+    if (out->masscan && out->masscan->is_udp_probe_experimental &&
+        udp_probe_is_registered(69) && out->masscan->targets.ports.count == 1 &&
+        out->masscan->targets.ports.list[0].begin == (69 | Templ_UDP) &&
+        out->masscan->targets.ports.list[0].end == (69 | Templ_UDP)) {
+        struct UdpProbeTarget target;
+        uint64_t cookie = (uint32_t)syn_cookie(ip_them, 69 | Templ_UDP,
+                                              parsed->dst_ip, parsed->port_dst, entropy);
+        target.source = parsed->dst_ip; target.destination = ip_them;
+        target.source_port = parsed->port_dst;
+        if (!port_them) return;
+        probe_protocol = udp_probe_classify_timed(69, banner_data, banner_length,
+                                                  cookie, &target, timestamp);
+        if (probe_protocol == PROTO_NONE) return;
+        port_them = 69;
+        banner_data = (const unsigned char *)"error-response";
+        banner_length = 14;
+        is_raw = 1;
+    }
 
     /* Report "open" status regardless  */
     output_report_status(
@@ -82,7 +104,7 @@ handle_udp(struct Output *out, time_t timestamp,
                              parsed->mac_src);
 
 
-    if (out->masscan != NULL && out->masscan->is_udp_probe_experimental) {
+    if (probe_protocol == PROTO_NONE && out->masscan != NULL && out->masscan->is_udp_probe_experimental) {
         uint64_t cookie = (uint32_t)syn_cookie(ip_them, port_them | Templ_UDP,
                                      parsed->dst_ip, parsed->port_dst,
                                      entropy);
@@ -98,7 +120,7 @@ handle_udp(struct Output *out, time_t timestamp,
     if (probe_protocol != PROTO_NONE) {
         output_report_banner(out, timestamp, ip_them, 17, port_them,
                              probe_protocol, parsed->ip_ttl,
-                             px + parsed->app_offset, parsed->app_length);
+                             banner_data, banner_length);
         status = 1;
     } else if (out->masscan != NULL && out->masscan->is_udp_probe_experimental &&
                udp_probe_is_registered(port_them)) {
@@ -166,6 +188,7 @@ handle_udp(struct Output *out, time_t timestamp,
 struct UdpSelftestCapture {
     unsigned banner_count;
     unsigned banner_length;
+    unsigned port;
     enum ApplicationProtocol protocol;
     unsigned char banner[8];
 };
@@ -218,6 +241,7 @@ udp_selftest_banner(struct Output *out, FILE *fp, time_t timestamp,
 
     udp_selftest_capture.banner_count++;
     udp_selftest_capture.banner_length = length;
+    udp_selftest_capture.port = port;
     udp_selftest_capture.protocol = proto;
     if (length > sizeof(udp_selftest_capture.banner))
         length = sizeof(udp_selftest_capture.banner);
@@ -423,6 +447,69 @@ proto_udp_selftest(void)
             fclose(fp);
             if (udp_selftest_capture.banner_count != 1 ||
                 udp_selftest_capture.protocol != PROTO_STUN) return 1;
+        }
+    }
+    {
+        struct UdpProbeTarget target;
+        struct Range single_port = {Templ_UDP + 69, Templ_UDP + 69};
+        static const unsigned char error_reply[] = {0, 5, 0, 1, 'E', 0};
+        parsed.src_ip.version = parsed.dst_ip.version = 4;
+        parsed.src_ip.ipv4 = 0xc6336401; parsed.dst_ip.ipv4 = 0xc0000201;
+        parsed.port_src = 55000; parsed.port_dst = 40000;
+        parsed.app_offset = 0; parsed.app_length = sizeof(error_reply);
+        target.source = parsed.dst_ip; target.destination = parsed.src_ip;
+        target.source_port = parsed.port_dst;
+        masscan.targets.ports.list = &single_port;
+        masscan.targets.ports.count = 1;
+        cookie = (uint32_t)syn_cookie(parsed.src_ip, 69 | Templ_UDP,
+                                      parsed.dst_ip, parsed.port_dst, 7);
+        if (!udp_probe_prepare(69, cookie, &target, &request)) return 1;
+        memset(&udp_selftest_capture, 0, sizeof(udp_selftest_capture));
+        fp = tmpfile();
+        if (!fp) return 1;
+        out.fp = fp;
+        handle_udp(&out, time(NULL), error_reply, sizeof(error_reply), &parsed, 7);
+        fclose(fp);
+        if (udp_selftest_capture.banner_count != 1 ||
+            udp_selftest_capture.protocol != PROTO_TFTP_ERROR || udp_selftest_capture.port != 69 ||
+            udp_selftest_capture.banner_length != 14) return 1;
+        {
+            unsigned j;
+            unsigned char changed[7];
+            time_t now = time(NULL);
+            if (request.length != 55 || memcmp(request.payload, "\x00\x01" "probe-", 8) ||
+                memcmp(request.payload + 40, ".missing\x00" "octet", 15)) return 1;
+            for (j = 8; j < 40; j++)
+                if (!strchr("0123456789abcdef", request.payload[j])) return 1;
+            for (j = 0; j < sizeof(error_reply); j++)
+                if (udp_probe_classify_target(69, error_reply, j, cookie, &target) != PROTO_NONE) return 1;
+            if (udp_probe_classify_target(69, error_reply, sizeof(error_reply), cookie, &target) != PROTO_TFTP_ERROR ||
+                udp_probe_classify_target(69, error_reply, sizeof(error_reply), cookie + 1, &target) != PROTO_NONE ||
+                udp_probe_classify(69, error_reply, sizeof(error_reply), cookie) != PROTO_NONE) return 1;
+            for (j = 0; j < 10; j++) {
+                time_t received = now;
+                memcpy(changed, error_reply, sizeof(error_reply));
+                parsed.src_ip = target.destination; parsed.dst_ip = target.source;
+                parsed.port_src = 55000; parsed.port_dst = target.source_port;
+                parsed.app_length = sizeof(error_reply);
+                if (j == 0) parsed.src_ip.ipv4++;
+                if (j == 1) parsed.dst_ip.ipv4++;
+                if (j == 2) parsed.port_dst++;
+                if (j == 3) received += 61;
+                if (j == 4) received = 0;
+                if (j == 5) changed[1] = 3;
+                if (j == 6) changed[3] = 8;
+                if (j == 7) changed[5] = 'X';
+                if (j == 8) { changed[6] = 0; parsed.app_length = 7; }
+                if (j == 9) parsed.port_src = 0;
+                memset(&udp_selftest_capture, 0, sizeof(udp_selftest_capture));
+                fp = tmpfile();
+                if (!fp) return 1;
+                out.fp = fp;
+                handle_udp(&out, received, changed, parsed.app_length, &parsed, 7);
+                fclose(fp);
+                if (udp_selftest_capture.banner_count) return 1;
+            }
         }
     }
 #endif

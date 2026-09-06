@@ -20,6 +20,7 @@
 #include "proto-udp-enttec.h"
 #include "proto-udp-a2s.h"
 #include "proto-udp-plex.h"
+#include "proto-udp-tftp.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -881,6 +882,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {3702, PROTO_ONVIF, onvif_probe_prepare, NULL, onvif_probe_classify},
     {34964, PROTO_NONE, epm_probe_prepare, NULL, epm_probe_classify},
     {32414, PROTO_PLEX, plex_probe_prepare, plex_probe_classify},
+    {69, PROTO_TFTP_ERROR, tftp_probe_prepare, NULL, tftp_probe_classify},
 #endif
     {0, PROTO_NONE, 0, 0}
 };
@@ -948,6 +950,21 @@ udp_probe_classify_target(unsigned port, const unsigned char *response,
     }
 
     return PROTO_NONE;
+}
+
+enum ApplicationProtocol
+udp_probe_classify_timed(unsigned port, const unsigned char *response,
+                          unsigned response_length, uint64_t cookie,
+                          const struct UdpProbeTarget *target, time_t timestamp)
+{
+    if (!response) return PROTO_NONE;
+#ifdef UDP_EXTENDED_PROBES
+    if (port == 69)
+        return tftp_probe_response(response, response_length, cookie, target, timestamp) ? PROTO_TFTP_ERROR : PROTO_NONE;
+#else
+    (void)timestamp;
+#endif
+    return udp_probe_classify_target(port, response, response_length, cookie, target);
 }
 
 #ifdef UDP_EXTENDED_PROBES

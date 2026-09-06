@@ -2,6 +2,7 @@
 #define PROTO_UDP_PROBE_H
 
 #include <stdint.h>
+#include <time.h>
 #include "masscan-app.h"
 #include "massip-addr.h"
 
@@ -38,6 +39,12 @@ udp_probe_classify_target(unsigned port, const unsigned char *response,
 
 int
 udp_probe_catalog_selftest(void);
+
+/* Reception timestamp enables expiry checks for prepared stateful probes. */
+enum ApplicationProtocol
+udp_probe_classify_timed(unsigned port, const unsigned char *response,
+                          unsigned response_length, uint64_t cookie,
+                          const struct UdpProbeTarget *target, time_t timestamp);
 
 int
 udp_probe_is_registered(unsigned port);

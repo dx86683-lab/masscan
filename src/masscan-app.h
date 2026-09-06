@@ -81,6 +81,7 @@ enum ApplicationProtocol {
     PROTO_ENTTEC,
     PROTO_A2S,
     PROTO_PLEX,
+    PROTO_TFTP_ERROR,
 
     PROTO_end_of_list /* must be last one */
 };
