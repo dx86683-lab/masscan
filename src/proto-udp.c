@@ -91,6 +91,10 @@ handle_udp(struct Output *out, time_t timestamp,
         is_raw = 1;
     }
 
+    if (out->masscan && out->masscan->is_udp_probe_experimental &&
+        (!massip_has_ip(&out->masscan->targets, ip_them) ||
+         !massip_has_port(&out->masscan->targets, port_them | Templ_UDP))) return;
+
     /* Report "open" status regardless  */
     output_report_status(
                              out,
@@ -186,6 +190,7 @@ handle_udp(struct Output *out, time_t timestamp,
 }
 
 struct UdpSelftestCapture {
+    unsigned status_count;
     unsigned banner_count;
     unsigned banner_length;
     unsigned port;
@@ -214,6 +219,7 @@ udp_selftest_status(struct Output *out, FILE *fp, time_t timestamp,
                     int status, ipaddress ip, unsigned ip_proto,
                     unsigned port, unsigned reason, unsigned ttl)
 {
+    udp_selftest_capture.status_count++;
     UNUSEDPARM(out);
     UNUSEDPARM(fp);
     UNUSEDPARM(timestamp);
@@ -269,6 +275,9 @@ proto_udp_selftest(void)
     struct Output out;
     struct Masscan masscan;
     struct UdpPreparedProbe request;
+    struct Range planned_ipv4 = {0, 0xffffffff};
+    struct Range planned_ports = {Templ_UDP, Templ_UDP + 65535};
+    struct Range6 planned_ipv6 = {{0, 0}, {UINT64_MAX, UINT64_MAX}};
     unsigned char response[27];
     uint64_t cookie;
     FILE *fp;
@@ -319,6 +328,12 @@ proto_udp_selftest(void)
 
     memset(&masscan, 0, sizeof(masscan));
     masscan.is_udp_probe_experimental = 1;
+    masscan.targets.ipv4.list = &planned_ipv4;
+    masscan.targets.ipv4.count = 1;
+    masscan.targets.ipv6.list = &planned_ipv6;
+    masscan.targets.ipv6.count = 1;
+    masscan.targets.ports.list = &planned_ports;
+    masscan.targets.ports.count = 1;
     out.masscan = &masscan;
     out.is_banner_rawudp = 0;
     parsed.port_src = 80;
@@ -397,6 +412,33 @@ proto_udp_selftest(void)
     if (udp_selftest_capture.banner_count != 1 ||
         udp_selftest_capture.protocol != PROTO_NONE) return 1;
 
+    {
+        unsigned char discovery[72] = {0};
+        unsigned variant;
+        memcpy(discovery, "\x06\x10\x02\x0c\x00\x48\x08\x01\xc0\x00\x02\x01\x0e\x57", 14);
+        discovery[14] = 54; discovery[15] = 1; discovery[16] = 2;
+        memcpy(discovery + 68, "\x04\x02\x02\x02", 4);
+        for (variant = 0; variant < 3; variant++) {
+            planned_ipv4.begin = planned_ipv4.end = 0xc6336401;
+            planned_ports.begin = planned_ports.end = Templ_UDP + (variant == 1 ? 123 : 3671);
+            parsed.src_ip.ipv4 = variant == 0 ? 0xc6336402 : 0xc6336401;
+            parsed.port_src = 3671; parsed.app_offset = 0; parsed.app_length = sizeof(discovery);
+            memset(&udp_selftest_capture, 0, sizeof(udp_selftest_capture));
+            fp = tmpfile();
+            if (!fp) return 1;
+            out.fp = fp;
+            handle_udp(&out, 0, discovery, sizeof(discovery), &parsed, 7);
+            fclose(fp);
+            if (variant < 2 && (udp_selftest_capture.banner_count || udp_selftest_capture.status_count)) {
+                fprintf(stderr, "udp: unplanned endpoint reported\n");
+                return 1;
+            }
+            if (variant == 2 && (udp_selftest_capture.protocol != PROTO_KNX ||
+                udp_selftest_capture.banner_count != 1 || udp_selftest_capture.status_count != 1)) return 1;
+        }
+        planned_ipv4.begin = 0; planned_ipv4.end = 0xffffffff;
+        planned_ports.begin = Templ_UDP; planned_ports.end = Templ_UDP + 65535;
+    }
 #ifdef UDP_EXTENDED_PROBES
     parsed.port_src = 1194;
     parsed.app_length = 26;
