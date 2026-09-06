@@ -296,6 +296,40 @@ slp_classify(const unsigned char *response, unsigned length, uint64_t cookie)
     return list_length == length - 20 && slp_text_valid(response + 20, list_length);
 }
 
+static int
+xdmcp_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+               struct UdpPreparedProbe *result)
+{
+    (void)cookie;
+    (void)target;
+    memset(result->payload, 0, 7);
+    result->payload[1] = 1;
+    result->payload[3] = 2;
+    result->payload[5] = 1;
+    result->length = 7;
+    return 1;
+}
+
+static int
+xdmcp_classify(const unsigned char *response, unsigned length, uint64_t cookie)
+{
+    unsigned offset = 6, count;
+    (void)cookie;
+    if (length < 10 || response[0] != 0 || response[1] != 1 || response[2] != 0 ||
+        (response[3] != 5 && response[3] != 6) ||
+        ((unsigned)response[4] << 8 | response[5]) != length - 6) return 0;
+    count = response[3] == 5 ? 3 : 2;
+    while (count--) {
+        unsigned size;
+        if (length - offset < 2) return 0;
+        size = (unsigned)response[offset] << 8 | response[offset + 1];
+        offset += 2;
+        if (size > length - offset) return 0;
+        offset += size;
+    }
+    return offset == length;
+}
+
 static const struct UdpProbeSpec udp_probe_catalog[] = {
     {80, PROTO_QUIC, quic_prepare, quic_classify},
     {6969, PROTO_BITTORRENT, bittorrent_prepare, bittorrent_classify},
@@ -304,6 +338,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {6060, PROTO_SIP, sip_probe_prepare, sip_probe_classify},
     {5060, PROTO_SIP, sip_probe_prepare, sip_probe_classify},
     {427, PROTO_SLP, slp_prepare, slp_classify},
+    {177, PROTO_XDMCP, xdmcp_prepare, xdmcp_classify},
     {0, PROTO_NONE, 0, 0}
 };
 
@@ -377,6 +412,29 @@ udp_probe_catalog_selftest(void)
     };
     unsigned i;
 
+    {
+        unsigned char reply[] = {0, 1, 0, 5, 0, 9, 0, 0, 0, 1, 'x', 0, 2, 'o', 'k'};
+        if (udp_probe_classify(177, reply, sizeof(reply), cookie) != PROTO_XDMCP)
+            return 1;
+        if (!udp_probe_prepare(177, cookie, NULL, &result) || result.length != 7 ||
+            memcmp(result.payload, "\x00\x01\x00\x02\x00\x01\x00", 7)) return 1;
+        for (i = 0; i < sizeof(reply); i++) {
+            if (udp_probe_classify(177, reply, i, cookie) != PROTO_NONE) return 1;
+        }
+        reply[12] = 3;
+        if (udp_probe_classify(177, reply, sizeof(reply), cookie) != PROTO_NONE) return 1;
+        reply[12] = 1;
+        if (udp_probe_classify(177, reply, sizeof(reply), cookie) != PROTO_NONE) return 1;
+        reply[12] = 2;
+        reply[3] = 8;
+        if (udp_probe_classify(177, reply, sizeof(reply), cookie) != PROTO_NONE) return 1;
+        reply[3] = 6;
+        reply[5] = 7;
+        memmove(reply + 6, reply + 8, 7);
+        if (udp_probe_classify(177, reply, 13, cookie) != PROTO_XDMCP) return 1;
+        reply[1] = 2;
+        if (udp_probe_classify(177, reply, 13, cookie) != PROTO_NONE) return 1;
+    }
     {
         unsigned char reply[25] = {
             2, 10, 0, 0, 24, 0, 0, 0, 0, 0, 0xcd, 0xef, 0, 2,

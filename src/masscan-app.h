@@ -51,6 +51,7 @@ enum ApplicationProtocol {
     PROTO_MGCP,
     PROTO_SIP,
     PROTO_SLP,
+    PROTO_XDMCP,
 
     PROTO_end_of_list /* must be last one */
 };
