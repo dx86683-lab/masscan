@@ -17,6 +17,7 @@
 #include "proto-udp-epm.h"
 #include "proto-udp-knx.h"
 #include "proto-udp-slmp.h"
+#include "proto-udp-enttec.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -865,6 +866,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {3671, PROTO_KNX, knx_probe_prepare, knx_probe_classify},
     {5006, PROTO_SLMP, slmp_probe_prepare, slmp_probe_classify},
     {5007, PROTO_SLMP, slmp_probe_prepare, slmp_probe_classify},
+    {3333, PROTO_ENTTEC, enttec_probe_prepare, enttec_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
     {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
@@ -970,6 +972,36 @@ udp_probe_catalog_selftest(void)
 {
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
+    {
+        static const unsigned char reply[] =
+            "ESPR\x02\x00\x00\x00\x00\x01\x00\x0a\x01\x00"
+            "Test Node \x00\x00\x40";
+        if (udp_probe_classify(3333, reply, sizeof(reply) - 1, cookie) != PROTO_ENTTEC) return 1;
+        {
+            unsigned j;
+            unsigned char changed[28];
+            if (!udp_probe_prepare(3333, cookie, NULL, &result) || result.length != 5 ||
+                memcmp(result.payload, "ESPP\x01", 5)) return 1;
+            for (j = 0; j < 27; j++)
+                if (udp_probe_classify(3333, reply, j, cookie) != PROTO_NONE) return 1;
+            for (j = 0; j < 4; j++) {
+                memcpy(changed, reply, 27); changed[j] ^= 1;
+                if (udp_probe_classify(3333, changed, 27, cookie) != PROTO_NONE) return 1;
+            }
+            memcpy(changed, reply, 27);
+            changed[10] = 255;
+            if (udp_probe_classify(3333, changed, 27, cookie) != PROTO_NONE) return 1;
+            changed[10] = 0; changed[11] = 11;
+            memset(changed + 14, 'A', 10);
+            if (udp_probe_classify(3333, changed, 27, cookie) != PROTO_ENTTEC) return 1;
+            changed[23] = 1;
+            if (udp_probe_classify(3333, changed, 27, cookie) != PROTO_NONE) return 1;
+            memset(changed + 14, 0, 10);
+            if (udp_probe_classify(3333, changed, 27, cookie) != PROTO_ENTTEC) return 1;
+            changed[27] = 0;
+            if (udp_probe_classify(3333, changed, 28, cookie) != PROTO_NONE) return 1;
+        }
+    }
     {
         static const unsigned char reply[] =
             "\xd4\x00\x34\x12\x00\x00\x00\xff\xff\x03\x00\x14\x00\x00\x00"
