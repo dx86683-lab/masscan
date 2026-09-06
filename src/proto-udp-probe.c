@@ -226,6 +226,76 @@ mgcp_classify(const unsigned char *response, unsigned response_length,
     return offset < response_length;
 }
 
+static int
+slp_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+             struct UdpPreparedProbe *result)
+{
+    (void)target;
+    memset(result->payload, 0, 29);
+    result->payload[0] = 2;
+    result->payload[1] = 9;
+    result->payload[4] = 29;
+    result->payload[10] = (unsigned char)(cookie >> 8);
+    result->payload[11] = (unsigned char)cookie;
+    result->payload[13] = 2;
+    result->payload[14] = 'e';
+    result->payload[15] = 'n';
+    result->payload[18] = result->payload[19] = 0xff;
+    result->payload[21] = 7;
+    memcpy(result->payload + 22, "DEFAULT", 7);
+    result->length = 29;
+    return 1;
+}
+
+static int
+slp_text_valid(const unsigned char *text, unsigned length)
+{
+    unsigned offset = 0;
+    while (offset < length) {
+        unsigned value = text[offset++];
+        unsigned continuation, minimum;
+        if (value < 0x80) {
+            if (value < 0x20 || value == 0x7f) return 0;
+            continue;
+        }
+        if (value >= 0xc2 && value <= 0xdf) {
+            continuation = 1; minimum = 0x80; value &= 0x1f;
+        } else if (value >= 0xe0 && value <= 0xef) {
+            continuation = 2; minimum = 0x800; value &= 0x0f;
+        } else if (value >= 0xf0 && value <= 0xf4) {
+            continuation = 3; minimum = 0x10000; value &= 7;
+        } else return 0;
+        if (continuation > length - offset) return 0;
+        while (continuation--) {
+            if ((text[offset] & 0xc0) != 0x80) return 0;
+            value = (value << 6) | (text[offset++] & 0x3f);
+        }
+        if (value < minimum || value > 0x10ffff ||
+            (value >= 0xd800 && value <= 0xdfff)) return 0;
+    }
+    return 1;
+}
+
+static int
+slp_classify(const unsigned char *response, unsigned length, uint64_t cookie)
+{
+    unsigned total, error, list_length;
+    if (length < 18 || response[0] != 2 || response[1] != 10) return 0;
+    total = (unsigned)response[2] << 16 | (unsigned)response[3] << 8 | response[4];
+    if (total != length || response[5] || response[6] || response[7] ||
+        response[8] || response[9]) return 0;
+    if (response[10] != (unsigned char)(cookie >> 8) ||
+        response[11] != (unsigned char)cookie || response[12] != 0 || response[13] != 2 ||
+        (response[14] != 'e' && response[14] != 'E') ||
+        (response[15] != 'n' && response[15] != 'N')) return 0;
+    error = (unsigned)response[16] << 8 | response[17];
+    if (error != 0)
+        return ((error <= 7) || (error >= 9 && error <= 15)) && length == 18;
+    if (length < 20) return 0;
+    list_length = (unsigned)response[18] << 8 | response[19];
+    return list_length == length - 20 && slp_text_valid(response + 20, list_length);
+}
+
 static const struct UdpProbeSpec udp_probe_catalog[] = {
     {80, PROTO_QUIC, quic_prepare, quic_classify},
     {6969, PROTO_BITTORRENT, bittorrent_prepare, bittorrent_classify},
@@ -233,6 +303,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {2427, PROTO_MGCP, mgcp_prepare, mgcp_classify},
     {6060, PROTO_SIP, sip_probe_prepare, sip_probe_classify},
     {5060, PROTO_SIP, sip_probe_prepare, sip_probe_classify},
+    {427, PROTO_SLP, slp_prepare, slp_classify},
     {0, PROTO_NONE, 0, 0}
 };
 
@@ -305,6 +376,43 @@ udp_probe_catalog_selftest(void)
         0x00, 0x01, 0x1f, 0x40, 0x00
     };
     unsigned i;
+
+    {
+        unsigned char reply[25] = {
+            2, 10, 0, 0, 24, 0, 0, 0, 0, 0, 0xcd, 0xef, 0, 2,
+            'e', 'n', 0, 0, 0, 4, 'h', 't', 't', 'p'
+        };
+        if (udp_probe_classify(427, reply, 24, cookie) != PROTO_SLP)
+            return 1;
+        if (!udp_probe_prepare(427, cookie, NULL, &result) || result.length != 29 ||
+            memcmp(result.payload,
+                "\x02\x09\x00\x00\x1d\x00\x00\x00\x00\x00\xcd\xef\x00\x02"
+                "en\x00\x00\xff\xff\x00\x07" "DEFAULT", 29)) return 1;
+        for (i = 0; i < 24; i++) {
+            if (udp_probe_classify(427, reply, i, cookie) != PROTO_NONE) return 1;
+        }
+        if (udp_probe_classify(427, reply, 25, cookie) != PROTO_NONE ||
+            udp_probe_classify(427, reply, 24, cookie ^ 1) != PROTO_NONE) return 1;
+        reply[5] = 0x80;
+        if (udp_probe_classify(427, reply, 24, cookie) != PROTO_NONE) return 1;
+        reply[5] = 0;
+        reply[9] = 20;
+        if (udp_probe_classify(427, reply, 24, cookie) != PROTO_NONE) return 1;
+        reply[9] = 0;
+        memcpy(reply + 20, "\xf0\x9f\x98\x80", 4);
+        if (udp_probe_classify(427, reply, 24, cookie) != PROTO_SLP) return 1;
+        memcpy(reply + 20, "\xed\xa0\x80x", 4);
+        if (udp_probe_classify(427, reply, 24, cookie) != PROTO_NONE) return 1;
+        reply[4] = 20;
+        reply[19] = 0;
+        if (udp_probe_classify(427, reply, 20, cookie) != PROTO_SLP) return 1;
+        reply[4] = 18;
+        if (udp_probe_classify(427, reply, 18, cookie) != PROTO_NONE) return 1;
+        reply[17] = 14;
+        if (udp_probe_classify(427, reply, 18, cookie) != PROTO_SLP) return 1;
+        reply[17] = 8;
+        if (udp_probe_classify(427, reply, 18, cookie) != PROTO_NONE) return 1;
+    }
 
     if (!udp_probe_prepare(64738, cookie, NULL, &result) || result.length != 12)
         return 1;

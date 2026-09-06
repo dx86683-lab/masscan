@@ -52,6 +52,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_MUMBLE:           return "mumble";
     case PROTO_MGCP:             return "mgcp";
     case PROTO_SIP:              return "sip";
+    case PROTO_SLP:              return "slp";
         
     case PROTO_ERROR:           return "error";
             
@@ -110,6 +111,7 @@ masscan_string_to_app(const char *str)
         {"mumble",      PROTO_MUMBLE},
         {"mgcp",        PROTO_MGCP},
         {"sip",         PROTO_SIP},
+        {"slp",         PROTO_SLP},
         {0,0}
     };
     size_t i;
@@ -136,6 +138,7 @@ masscan_app_selftest(void) {
         {PROTO_MUMBLE, 39},
         {PROTO_MGCP, 40},
         {PROTO_SIP, 41},
+        {PROTO_SLP, 42},
         {0,0}
     };
     size_t i;
@@ -165,6 +168,9 @@ masscan_app_selftest(void) {
         return 1;
     if (masscan_string_to_app("sip") != PROTO_SIP ||
         strcmp(masscan_app_to_string(PROTO_SIP), "sip") != 0)
+        return 1;
+    if (masscan_string_to_app("slp") != PROTO_SLP ||
+        strcmp(masscan_app_to_string(PROTO_SLP), "slp") != 0)
         return 1;
     return 0;
 }
