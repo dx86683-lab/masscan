@@ -1162,7 +1162,8 @@ _template_init_ipv6(struct TemplatePacket *tmpl, macaddress_t router_mac_ipv6, u
     offset_tcp = tmpl->ipv4.offset_tcp;
 
     /* Create a copy of the IPv4 packet */
-    buf = MALLOC(tmpl->ipv4.length + 40);
+    /* Payload fixups update both address-family templates. */
+    buf = MALLOC(2048 + tmpl->ipv4.length + 40);
     memcpy(buf, tmpl->ipv4.packet, tmpl->ipv4.length);
     tmpl->ipv6.packet = buf;
 
@@ -1524,7 +1525,7 @@ template_set_vlan(struct TemplateSet *tmplset, unsigned vlan)
         if (tmpl->ipv4.length < 14)
             continue;
         
-        px = MALLOC(tmpl->ipv4.length + 4);
+        px = MALLOC(2048 + tmpl->ipv4.length + 4);
         memcpy(px, tmpl->ipv4.packet, 12);
         memcpy(px+16, tmpl->ipv4.packet+12, tmpl->ipv4.length - 12);
         
@@ -1582,6 +1583,7 @@ template_selftest(void)
     //failures += tmplset->pkts[Proto_ARP].proto  != Proto_ARP;
 
     tmplset->is_udp_probe_experimental = 1;
+    template_set_vlan(tmplset, 7);
     template_set_target_ipv4(tmplset, 0x7f000001,
                              Templ_UDP + 6969, 0x7f000002, 40000,
                              0x89abcdef, packet, sizeof(packet),
@@ -1611,6 +1613,19 @@ template_selftest(void)
             tmplset->pkts[Proto_UDP].ipv4.offset_app + strlen(expected);
         failures += memcmp(packet + tmplset->pkts[Proto_UDP].ipv4.offset_app,
                            expected, strlen(expected)) != 0;
+    }
+
+    template_set_target_ipv4(tmplset, 0xc0000201,
+                             Templ_UDP + 80, 0xc6336401, 40000,
+                             0x89abcdef, packet, sizeof(packet), &packet_length);
+    failures += packet_length != tmplset->pkts[Proto_UDP].ipv4.offset_app + UDP_PROBE_MAX_PAYLOAD;
+    {
+        ipv6address destination = {0x20010db800000000ULL, 1};
+        ipv6address source = {0x20010db800000000ULL, 2};
+        template_set_target_ipv6(tmplset, destination, Templ_UDP + 80,
+                                 source, 40000, 0x89abcdef,
+                                 packet, sizeof(packet), &packet_length);
+        failures += packet_length != tmplset->pkts[Proto_UDP].ipv6.offset_app + UDP_PROBE_MAX_PAYLOAD;
     }
 
     if (failures)
