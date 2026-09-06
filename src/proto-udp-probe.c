@@ -13,6 +13,7 @@
 #include "proto-udp-ikev1.h"
 #include "proto-udp-ikev2.h"
 #include "proto-udp-stun.h"
+#include "proto-udp-onvif.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -866,6 +867,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {4500, PROTO_IKEV1, ikev1_probe_prepare, ikev1_probe_classify},
     {500, PROTO_IKEV2, ikev2_probe_prepare, ikev2_probe_classify},
     {3478, PROTO_STUN, stun_probe_prepare, NULL, stun_probe_classify},
+    {3702, PROTO_ONVIF, onvif_probe_prepare, NULL, onvif_probe_classify},
 #endif
     {0, PROTO_NONE, 0, 0}
 };
@@ -931,6 +933,27 @@ udp_probe_classify_target(unsigned port, const unsigned char *response,
 
     return PROTO_NONE;
 }
+
+#ifdef UDP_EXTENDED_PROBES
+static int
+onvif_fixture_case(const char *original, const char *needle, const char *replacement,
+                   int expected, uint64_t cookie, const struct UdpProbeTarget *target)
+{
+    char changed[8192];
+    const char *position = strstr(original, needle);
+    size_t prefix, suffix, inserted = strlen(replacement), length;
+    if (!position) return 0;
+    prefix = (size_t)(position - original);
+    suffix = strlen(position + strlen(needle));
+    length = prefix + inserted + suffix;
+    if (length >= sizeof(changed)) return 0;
+    memcpy(changed, original, prefix);
+    memcpy(changed + prefix, replacement, inserted);
+    memcpy(changed + prefix + inserted, position + strlen(needle), suffix);
+    return (udp_probe_classify_target(3702, (const unsigned char *)changed,
+            (unsigned)length, cookie, target) == PROTO_ONVIF) == expected;
+}
+#endif
 
 int
 udp_probe_catalog_selftest(void)
@@ -1010,6 +1033,117 @@ udp_probe_catalog_selftest(void)
         }
     }
 #ifdef UDP_EXTENDED_PROBES
+    {
+        struct UdpProbeTarget target;
+        char reply[2048], message_id[46];
+        const char *start;
+        int length;
+        memset(&target, 0, sizeof(target));
+        target.source.version = target.destination.version = 4;
+        target.source.ipv4 = 0xc0000201; target.destination.ipv4 = 0xc6336401;
+        target.source_port = 40000;
+        if (!udp_probe_runtime_init() || !udp_probe_prepare(3702, cookie, &target, &result)) return 1;
+        start = strstr((const char *)result.payload, "<a:MessageID>");
+        if (!start) return 1;
+        memcpy(message_id, start + 13, 45); message_id[45] = 0;
+        length = snprintf(reply, sizeof(reply),
+            "<s:Envelope xmlns:s='http://www.w3.org/2003/05/soap-envelope' "
+            "xmlns:a='http://schemas.xmlsoap.org/ws/2004/08/addressing' "
+            "xmlns:d='http://schemas.xmlsoap.org/ws/2005/04/discovery' "
+            "xmlns:n='http://www.onvif.org/ver10/device/wsdl'>"
+            "<s:Header><a:Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/ProbeMatches</a:Action>"
+            "<a:MessageID>urn:uuid:01234567-89ab-4cde-8012-3456789abcde</a:MessageID>"
+            "<a:RelatesTo>%s</a:RelatesTo>"
+            "<a:To>http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</a:To>"
+            "<d:AppSequence InstanceId='1' MessageNumber='1'/></s:Header>"
+            "<s:Body><d:ProbeMatches><d:ProbeMatch><a:EndpointReference>"
+            "<a:Address>urn:uuid:01234567-89ab-4cde-8012-3456789abcde</a:Address>"
+            "</a:EndpointReference><d:Types>n:Device</d:Types>"
+            "<d:Scopes>onvif://www.onvif.org/name/test</d:Scopes>"
+            "<d:XAddrs>http://192.0.2.1/onvif/device_service</d:XAddrs>"
+            "<d:MetadataVersion>1</d:MetadataVersion></d:ProbeMatch>"
+            "</d:ProbeMatches></s:Body></s:Envelope>", message_id);
+        if (length < 0 || (unsigned)length >= sizeof(reply) ||
+            udp_probe_classify_target(3702, (const unsigned char *)reply, (unsigned)length, cookie, &target) != PROTO_ONVIF) return 1;
+        if (!onvif_fixture_case(reply,
+                "<d:Types>n:Device</d:Types><d:Scopes>onvif://www.onvif.org/name/test</d:Scopes>",
+                "<d:Scopes>onvif://www.onvif.org/name/test</d:Scopes><d:Types>n:Device</d:Types>",
+                0, cookie, &target)) return 1;
+        if (!onvif_fixture_case(reply, "<a:Action>",
+                "<a:Action s:role='http://www.w3.org/2003/05/soap-envelope/role/none'>", 0, cookie, &target)) return 1;
+        {
+            static const struct {const char *needle, *replacement; int valid;} cases[] = {
+                {"xmlns:n='http://www.onvif.org/ver10/device/wsdl'", "xmlns:n='urn:other'", 0},
+                {"<d:Types>n:Device</d:Types>", "<d:Types xmlns='http://www.onvif.org/ver10/device/wsdl'>Device</d:Types>", 1},
+                {"<d:Types>n:Device</d:Types>", "<d:Types xmlns:q='http://www.onvif.org/ver10/device/wsdl'>q:Device</d:Types>", 1},
+                {"<d:Types>n:Device</d:Types>", "<d:Types xmlns:n='urn:other'>n:Device</d:Types>", 0},
+                {"<d:Types>n:Device</d:Types>", "<d:Types>z:Device</d:Types>", 0},
+                {"<d:Types>n:Device</d:Types>", "<d:Types>n:Printer</d:Types>", 0},
+                {"<d:Types>n:Device</d:Types>", "<d:Types>n:<x/>Device</d:Types>", 0},
+                {"<d:Types>n:Device</d:Types>", "<d:Types>n:Printer n:Device</d:Types>", 1},
+                {"<d:AppSequence InstanceId='1' MessageNumber='1'/>", "", 0},
+                {"<d:AppSequence InstanceId='1' MessageNumber='1'/>", "<d:AppSequence InstanceId='1'/>", 0},
+                {"InstanceId='1'", "InstanceId='4294967295'", 1},
+                {"InstanceId='1'", "InstanceId='4294967296'", 0},
+                {"MessageNumber='1'", "MessageNumber=' +1 '", 1},
+                {"MessageNumber='1'", "MessageNumber='-1'", 0},
+                {"<d:MetadataVersion>1", "<d:MetadataVersion>4294967296", 0},
+                {"<a:RelatesTo>", "<a:RelatesTo RelationshipType='a:Reply'>", 1},
+                {"<a:RelatesTo>", "<a:RelatesTo RelationshipType='d:Suppression'>urn:other</a:RelatesTo><a:RelatesTo>", 1},
+                {"<a:RelatesTo>", "<a:RelatesTo RelationshipType='d:Suppression'>", 0},
+                {"<a:RelatesTo>", "<a:RelatesTo>urn:other</a:RelatesTo><a:RelatesTo>", 0},
+                {"<s:Header>", "<s:Header><x:Ignored xmlns:x='urn:extra' s:mustUnderstand='false'><x:Text>optional</x:Text></x:Ignored>", 1},
+                {"<s:Header>", "<s:Header><x:Ignored xmlns:x='urn:extra' s:mustUnderstand='true'/>", 0},
+                {"<s:Header>", "<s:Header><x:Ignored xmlns:x='urn:extra' xmlns:n='urn:wrong'/>", 1},
+                {"<a:Action>", "<a:Action s:role='http://www.w3.org/2003/05/soap-envelope/role/ultimateReceiver'>", 1},
+                {"<s:Header>", "<s:Header><a:Action>urn:wrong</a:Action>", 0},
+                {"<d:XAddrs>http://192.0.2.1/onvif/device_service</d:XAddrs>", "", 0},
+                {"http://192.0.2.1/onvif/device_service", "https://[2001:db8::1]:443/device?a=1&amp;b=2", 1},
+                {"http://192.0.2.1/onvif/device_service", "ftp://192.0.2.1/device", 0},
+                {"http://192.0.2.1/onvif/device_service", "http://host:65536/device", 0},
+                {"http://192.0.2.1/onvif/device_service", "http://host/%GG", 0},
+                {"http://192.0.2.1/onvif/device_service", "http://user@host/device", 0},
+                {"http://192.0.2.1/onvif/device_service", "http://host/device http://other/device", 1},
+                {"<s:Envelope", "<!DOCTYPE Envelope><s:Envelope", 0},
+                {"<s:Envelope", "<!DOCTYPE Envelope SYSTEM 'file:///nonexistent'><s:Envelope", 0},
+                {"<s:Envelope", "<?xml version='1.0' encoding='ISO-8859-1'?><s:Envelope", 0},
+                {"</s:Envelope>", "</s:Envelope><!--end-->", 1},
+                {"</s:Envelope>", "</s:Envelope>garbage", 0},
+                {"<d:MetadataVersion>1</d:MetadataVersion>", "<d:MetadataVersion>1</d:MetadataVersion><d:MetadataVersion>1</d:MetadataVersion>", 0},
+                {"<a:EndpointReference>", "<a:EndpointReference><a:Address>urn:other</a:Address>", 0}
+            };
+            struct UdpProbeTarget other = target;
+            for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+                if (!onvif_fixture_case(reply, cases[i].needle, cases[i].replacement, cases[i].valid, cookie, &target)) {
+                    fprintf(stderr, "udp: XML fixture %u failed\n", i); return 1;
+                }
+            for (i = 0; i < (unsigned)length; i++)
+                if (udp_probe_classify_target(3702, (const unsigned char *)reply, i, cookie, &target) != PROTO_NONE) return 1;
+            other.destination.ipv4++;
+            if (udp_probe_classify_target(3702, (const unsigned char *)reply, (unsigned)length, cookie, &other) != PROTO_NONE ||
+                udp_probe_classify_target(3702, (const unsigned char *)reply, (unsigned)length, cookie ^ 1, &target) != PROTO_NONE ||
+                udp_probe_classify(3702, (const unsigned char *)reply, (unsigned)length, cookie) != PROTO_NONE) return 1;
+            {
+                char duplicate[4096], nested[512];
+                const char *begin = strstr(reply, "<d:ProbeMatch>");
+                const char *end = strstr(reply, "</d:ProbeMatch>");
+                size_t size, used = 0;
+                if (!begin || !end) return 1;
+                size = (size_t)(end + strlen("</d:ProbeMatch>") - begin);
+                if (2 * size + 1 > sizeof(duplicate)) return 1;
+                memcpy(duplicate, begin, size); memcpy(duplicate + size, begin, size); duplicate[2 * size] = 0;
+                if (!onvif_fixture_case(reply, "</d:ProbeMatches>", duplicate, 0, cookie, &target)) return 1;
+                memcpy(duplicate, begin, size); duplicate[size] = 0;
+                memcpy(duplicate + size, "</d:ProbeMatches>", sizeof("</d:ProbeMatches>"));
+                if (!onvif_fixture_case(reply, "</d:ProbeMatches>", duplicate, 1, cookie, &target)) return 1;
+                memcpy(nested, "<s:Header>", 10); used = 10;
+                for (i = 0; i < 17; i++) { memcpy(nested + used, "<x>", 3); used += 3; }
+                for (i = 0; i < 17; i++) { memcpy(nested + used, "</x>", 4); used += 4; }
+                nested[used] = 0;
+                if (!onvif_fixture_case(reply, "<s:Header>", nested, 0, cookie, &target)) return 1;
+            }
+        }
+    }
     {
         struct UdpProbeTarget target;
         unsigned char reply[64] = {0};

@@ -73,6 +73,7 @@ enum ApplicationProtocol {
     PROTO_IKEV1,
     PROTO_IKEV2,
     PROTO_STUN,
+    PROTO_ONVIF,
 
     PROTO_end_of_list /* must be last one */
 };
