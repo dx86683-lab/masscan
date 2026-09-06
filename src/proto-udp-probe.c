@@ -115,7 +115,8 @@ bittorrent_classify(const unsigned char *response, unsigned response_length,
 {
     unsigned char expected[4];
 
-    if (response_length != 16)
+    /* BEP 15 permits extensions after the 16-byte connect response. */
+    if (response_length < 16)
         return 0;
     if (response[0] != 0 || response[1] != 0 ||
         response[2] != 0 || response[3] != 0)
@@ -190,6 +191,7 @@ udp_probe_catalog_selftest(void)
         0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef
     };
     unsigned char invalid[sizeof(version_negotiation)];
+    unsigned i;
 
     memset(&result, 0xa5, sizeof(result));
     if (udp_probe_prepare(65535, 0, &result) != 0)
@@ -228,6 +230,28 @@ udp_probe_catalog_selftest(void)
     if (udp_probe_classify(80, version_negotiation,
                            sizeof(version_negotiation) - 1, cookie) != PROTO_NONE)
         return 1;
+    for (i = 0; i < 27; i++) {
+        if (udp_probe_classify(80, version_negotiation, i, cookie) != PROTO_NONE)
+            return 1;
+    }
+    for (i = 0x80; i <= 0xff; i++) {
+        memcpy(invalid, version_negotiation, sizeof(invalid));
+        invalid[0] = (unsigned char)i;
+        if (udp_probe_classify(80, invalid, 27, cookie) != PROTO_QUIC)
+            return 1;
+    }
+    memcpy(invalid, version_negotiation, sizeof(invalid));
+    invalid[0] = 0x40;
+    if (udp_probe_classify(80, invalid, sizeof(invalid), cookie) != PROTO_NONE)
+        return 1;
+    memcpy(invalid, version_negotiation, sizeof(invalid));
+    invalid[15] ^= 1;
+    if (udp_probe_classify(80, invalid, sizeof(invalid), cookie) != PROTO_NONE)
+        return 1;
+    memcpy(invalid, version_negotiation, sizeof(invalid));
+    memset(invalid + 23, 0, 4);
+    if (udp_probe_classify(80, invalid, sizeof(invalid), cookie) != PROTO_NONE)
+        return 1;
 
     if (udp_probe_prepare(6969, cookie, &result) == 0)
         return 1;
@@ -239,12 +263,27 @@ udp_probe_catalog_selftest(void)
     if (udp_probe_classify(6969, tracker_response,
                            sizeof(tracker_response), cookie) != PROTO_BITTORRENT)
         return 1;
+    memcpy(invalid, tracker_response, sizeof(tracker_response));
+    memset(invalid + sizeof(tracker_response), 0xa5,
+           sizeof(invalid) - sizeof(tracker_response));
+    if (udp_probe_classify(6969, invalid, sizeof(invalid), cookie) != PROTO_BITTORRENT)
+        return 1;
+    invalid[4] ^= 1;
+    if (udp_probe_classify(6969, invalid, sizeof(invalid), cookie) != PROTO_NONE)
+        return 1;
+    invalid[4] ^= 1;
+    invalid[3] = 3;
+    if (udp_probe_classify(6969, invalid, sizeof(invalid), cookie) != PROTO_NONE)
+        return 1;
     tracker_response[4] ^= 1;
     if (udp_probe_classify(6969, tracker_response,
                            sizeof(tracker_response), cookie) != PROTO_NONE)
         return 1;
-    if (udp_probe_classify(6969, tracker_response, 15, cookie) != PROTO_NONE)
-        return 1;
+    tracker_response[4] ^= 1;
+    for (i = 0; i < 16; i++) {
+        if (udp_probe_classify(6969, tracker_response, i, cookie) != PROTO_NONE)
+            return 1;
+    }
 
     return 0;
 }
