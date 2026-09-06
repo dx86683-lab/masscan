@@ -418,6 +418,7 @@ rawsock_send_probe_ipv4(
      */
     template_set_target_ipv4(tmplset, ip_them, port_them, ip_me, port_me, seqno,
         px, sizeof(px), &packet_length);
+    if (!packet_length) return;
     
     /*
      * Send it
@@ -441,6 +442,7 @@ rawsock_send_probe_ipv6(
      */
     template_set_target_ipv6(tmplset, ip_them, port_them, ip_me, port_me, seqno,
         px, sizeof(px), &packet_length);
+    if (!packet_length) return;
     
     /*
      * Send it
@@ -1001,4 +1003,3 @@ rawsock_selftest()
 
     return 0;
 }
-

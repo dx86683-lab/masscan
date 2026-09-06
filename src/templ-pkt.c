@@ -615,7 +615,7 @@ tcp_create_packet(
 
 /***************************************************************************
  ***************************************************************************/
-static void
+static int
 udp_payload_fixup(struct TemplateSet *tmplset, struct TemplatePacket *tmpl,
                   unsigned port, unsigned seqno,
                   const struct UdpProbeTarget *target)
@@ -627,8 +627,8 @@ udp_payload_fixup(struct TemplateSet *tmplset, struct TemplatePacket *tmpl,
     SET_COOKIE set_cookie = 0;
     struct UdpPreparedProbe prepared;
 
-    if (tmplset->is_udp_probe_experimental &&
-        udp_probe_prepare(port, seqno, target, &prepared)) {
+    if (tmplset->is_udp_probe_experimental && udp_probe_is_registered(port)) {
+        if (!udp_probe_prepare(port, seqno, target, &prepared)) return 0;
         px2 = prepared.payload;
         length2 = prepared.length;
     } else {
@@ -663,6 +663,7 @@ udp_payload_fixup(struct TemplateSet *tmplset, struct TemplatePacket *tmpl,
 
     tmpl->ipv4.length = tmpl->ipv4.offset_app + length2;
     tmpl->ipv6.length = tmpl->ipv6.offset_app + length2;
+    return 1;
 }
 
 void
@@ -702,7 +703,10 @@ template_set_target_ipv6(
             target.destination.version = 6;
             target.destination.ipv6 = ip_them;
             target.source_port = port_me;
-            udp_payload_fixup(tmplset, tmpl, port_them, seqno, &target);
+            if (!udp_payload_fixup(tmplset, tmpl, port_them, seqno, &target)) {
+                *r_length = 0;
+                return;
+            }
         }
     } else if (port_them < Templ_SCTP + 65536) {
         tmpl = &tmplset->pkts[Proto_SCTP];
@@ -927,7 +931,10 @@ template_set_target_ipv4(
             target.destination.version = 4;
             target.destination.ipv4 = ip_them;
             target.source_port = port_me;
-            udp_payload_fixup(tmplset, tmpl, port_them, seqno, &target);
+            if (!udp_payload_fixup(tmplset, tmpl, port_them, seqno, &target)) {
+                *r_length = 0;
+                return;
+            }
         }
     } else if (port_them < Templ_SCTP + 65536) {
         tmpl = &tmplset->pkts[Proto_SCTP];
@@ -1584,6 +1591,18 @@ template_selftest(void)
 
     tmplset->is_udp_probe_experimental = 1;
     template_set_vlan(tmplset, 7);
+    template_set_target_ipv4(tmplset, 0xc0000201,
+                             Templ_UDP + 5353, 0xc6336401, 5353,
+                             0x89abcdef, packet, sizeof(packet), &packet_length);
+    failures += packet_length != 0;
+    {
+        ipv6address destination = {0x20010db800000000ULL, 1};
+        ipv6address source = {0x20010db800000000ULL, 2};
+        template_set_target_ipv6(tmplset, destination, Templ_UDP + 5353,
+                                 source, 5353, 0x89abcdef,
+                                 packet, sizeof(packet), &packet_length);
+        failures += packet_length != 0;
+    }
     template_set_target_ipv4(tmplset, 0x7f000001,
                              Templ_UDP + 6969, 0x7f000002, 40000,
                              0x89abcdef, packet, sizeof(packet),
