@@ -60,6 +60,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_RIP:              return "rip";
     case PROTO_IPMI:             return "ipmi";
     case PROTO_AFS:              return "afs";
+    case PROTO_GTPC:             return "gtpc";
         
     case PROTO_ERROR:           return "error";
             
@@ -126,6 +127,7 @@ masscan_string_to_app(const char *str)
         {"rip",         PROTO_RIP},
         {"ipmi",        PROTO_IPMI},
         {"afs",         PROTO_AFS},
+        {"gtpc",        PROTO_GTPC},
         {0,0}
     };
     size_t i;
@@ -160,6 +162,7 @@ masscan_app_selftest(void) {
         {PROTO_RIP, 47},
         {PROTO_IPMI, 48},
         {PROTO_AFS, 49},
+        {PROTO_GTPC, 50},
         {0,0}
     };
     size_t i;
@@ -213,6 +216,9 @@ masscan_app_selftest(void) {
         return 1;
     if (masscan_string_to_app("afs") != PROTO_AFS ||
         strcmp(masscan_app_to_string(PROTO_AFS), "afs") != 0)
+        return 1;
+    if (masscan_string_to_app("gtpc") != PROTO_GTPC ||
+        strcmp(masscan_app_to_string(PROTO_GTPC), "gtpc") != 0)
         return 1;
     return 0;
 }
