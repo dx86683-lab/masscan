@@ -474,6 +474,8 @@ gtpu_classify(const unsigned char *response, unsigned length, uint64_t cookie)
 
 static const struct UdpProbeSpec udp_probe_catalog[] = {
     {80, PROTO_QUIC, quic_prepare, quic_classify},
+    {443, PROTO_QUIC, quic_prepare, quic_classify},
+    {2491, PROTO_QUIC, quic_prepare, quic_classify},
     {6969, PROTO_BITTORRENT, bittorrent_prepare, bittorrent_classify},
     {64738, PROTO_MUMBLE, mumble_prepare, mumble_classify},
     {2427, PROTO_MGCP, mgcp_prepare, mgcp_classify},
@@ -567,6 +569,19 @@ udp_probe_catalog_selftest(void)
     };
     unsigned i;
 
+    {
+        unsigned ports[] = {443, 2491};
+        for (i = 0; i < sizeof(ports) / sizeof(ports[0]); i++) {
+            if (!udp_probe_prepare(ports[i], cookie, NULL, &result) ||
+                result.length != UDP_PROBE_MAX_PAYLOAD ||
+                udp_probe_classify(ports[i], version_negotiation,
+                                   sizeof(version_negotiation), cookie) != PROTO_QUIC ||
+                udp_probe_classify(ports[i], version_negotiation,
+                                   sizeof(version_negotiation), cookie ^ 1) != PROTO_NONE ||
+                udp_probe_classify(ports[i], version_negotiation, 14, cookie) != PROTO_NONE)
+                return 1;
+        }
+    }
     {
         unsigned char reply[19] = {
             0x32, 2, 0, 6, 0, 0, 0, 0, 0xcd, 0xef, 0, 0, 14, 7
