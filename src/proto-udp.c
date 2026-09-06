@@ -122,7 +122,7 @@ handle_udp(struct Output *out, time_t timestamp,
     }
 
     if (probe_protocol != PROTO_NONE) {
-        if (probe_protocol == PROTO_UBIQUITI) {
+        if (probe_protocol == PROTO_UBIQUITI || probe_protocol == PROTO_PCANYWHERE) {
             banner_data = (const unsigned char *)"discovery-response";
             banner_length = 18;
         }
@@ -457,6 +457,15 @@ proto_udp_selftest(void)
             udp_selftest_capture.banner_count != 1 || udp_selftest_capture.banner_length != 18) {
             fprintf(stderr, "ubiquiti: discovery summary not emitted\n"); return 1;
         }
+        parsed.port_src = 5632; parsed.app_length = 17;
+        memset(&udp_selftest_capture, 0, sizeof(udp_selftest_capture));
+        fp = tmpfile();
+        if (!fp) return 1;
+        out.fp = fp;
+        handle_udp(&out, 0, (const unsigned char *)"NRLAB___AHM_3___", 17, &parsed, 7);
+        fclose(fp);
+        if (udp_selftest_capture.protocol != PROTO_PCANYWHERE ||
+            udp_selftest_capture.banner_count != 1 || udp_selftest_capture.banner_length != 18) return 1;
     }
 #ifdef UDP_EXTENDED_PROBES
     parsed.port_src = 1194;

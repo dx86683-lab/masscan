@@ -22,6 +22,7 @@
 #include "proto-udp-plex.h"
 #include "proto-udp-tftp.h"
 #include "proto-udp-ubiquiti.h"
+#include "proto-udp-pcanywhere.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -873,6 +874,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {3333, PROTO_ENTTEC, enttec_probe_prepare, enttec_probe_classify},
     {27015, PROTO_A2S, a2s_probe_prepare, a2s_probe_classify},
     {10001, PROTO_UBIQUITI, ubiquiti_probe_prepare, ubiquiti_probe_classify},
+    {5632, PROTO_PCANYWHERE, pcanywhere_probe_prepare, pcanywhere_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
     {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
@@ -1014,6 +1016,33 @@ udp_probe_catalog_selftest(void)
 {
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
+    {
+        static const unsigned char padded[] = "NRLAB___AHM_3___";
+        static const unsigned char plain[] = "NRLABAHM_3___";
+        static const char *invalid[] = {
+            "NRAHM_3___", "NQLAB___AHM_3___", "nrLAB___AHM_3___",
+            "NRLA_B___AHM_3___", "NRLAB___AHM_4___", "NRLA\nB___AHM_3___"
+        };
+        unsigned n;
+        if (udp_probe_classify(5632, padded, sizeof(padded), cookie) != PROTO_PCANYWHERE ||
+            udp_probe_classify(5632, plain, sizeof(plain), cookie) != PROTO_PCANYWHERE) {
+            fprintf(stderr, "pcanywhere: complete reply rejected\n"); return 1;
+        }
+        if (!udp_probe_prepare(5632, cookie, NULL, &result) || result.length != 2 ||
+            memcmp(result.payload, "NQ", 2)) return 1;
+        for (n = 0; n < sizeof(padded); n++)
+            if (udp_probe_classify(5632, padded, n, cookie) != PROTO_NONE) return 1;
+        for (n = 0; n < sizeof(invalid) / sizeof(*invalid); n++)
+            if (udp_probe_classify(5632, (const unsigned char *)invalid[n],
+                    (unsigned)strlen(invalid[n]) + 1, cookie) != PROTO_NONE) return 1;
+        {
+            unsigned char changed[sizeof(padded) + 1];
+            memcpy(changed, padded, sizeof(padded)); changed[sizeof(padded)] = 0;
+            if (udp_probe_classify(5632, changed, sizeof(changed), cookie) != PROTO_NONE) return 1;
+            changed[3] = 0;
+            if (udp_probe_classify(5632, changed, sizeof(padded), cookie) != PROTO_NONE) return 1;
+        }
+    }
     {
         static const unsigned char reply[] =
             "\x01\x00\x00\x13\x01\x00\x06\x02\x00\x00\x00\x00\x01\x14\x00\x07" "TestBox";
