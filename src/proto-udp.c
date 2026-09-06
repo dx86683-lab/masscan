@@ -1,5 +1,6 @@
 #include "proto-udp.h"
 #include "proto-udp-probe.h"
+#include "proto-udp-runtime.h"
 #include "proto-coap.h"
 #include "proto-dns.h"
 #include "proto-isakmp.h"
@@ -82,7 +83,7 @@ handle_udp(struct Output *out, time_t timestamp,
 
 
     if (out->masscan != NULL && out->masscan->is_udp_probe_experimental) {
-        uint64_t cookie = syn_cookie(ip_them, port_them | Templ_UDP,
+        uint64_t cookie = (uint32_t)syn_cookie(ip_them, port_them | Templ_UDP,
                                      parsed->dst_ip, parsed->port_dst,
                                      entropy);
         probe_protocol = udp_probe_classify(port_them,
@@ -367,6 +368,29 @@ proto_udp_selftest(void)
     fclose(fp);
     if (udp_selftest_capture.banner_count != 1 ||
         udp_selftest_capture.protocol != PROTO_NONE) return 1;
+
+#ifdef UDP_EXTENDED_PROBES
+    parsed.port_src = 1194;
+    parsed.app_length = 26;
+    cookie = syn_cookie(parsed.src_ip, parsed.port_src | Templ_UDP,
+                        parsed.dst_ip, parsed.port_dst, 7);
+    if (!(cookie >> 32) || !udp_probe_runtime_init() ||
+        !udp_probe_prepare(1194, (uint32_t)cookie, NULL, &request)) return 1;
+    memset(response, 0, sizeof(response));
+    response[0] = 0x40; response[1] = 1; response[9] = 1;
+    memcpy(response + 14, request.payload + 1, 8);
+    memset(&udp_selftest_capture, 0, sizeof(udp_selftest_capture));
+    fp = tmpfile();
+    if (fp == NULL) return 1;
+    out.fp = fp;
+    handle_udp(&out, 0, response, 26, &parsed, 7);
+    fclose(fp);
+    if (udp_selftest_capture.banner_count != 1 ||
+        udp_selftest_capture.protocol != PROTO_OPENVPN) {
+        fprintf(stderr, "udp: prepared cookie failed receive correlation\n");
+        return 1;
+    }
+#endif
 
     return 0;
 }
