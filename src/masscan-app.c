@@ -54,6 +54,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_SIP:              return "sip";
     case PROTO_SLP:              return "slp";
     case PROTO_XDMCP:            return "xdmcp";
+    case PROTO_NATPMP:           return "natpmp";
         
     case PROTO_ERROR:           return "error";
             
@@ -114,6 +115,7 @@ masscan_string_to_app(const char *str)
         {"sip",         PROTO_SIP},
         {"slp",         PROTO_SLP},
         {"xdmcp",       PROTO_XDMCP},
+        {"natpmp",      PROTO_NATPMP},
         {0,0}
     };
     size_t i;
@@ -142,6 +144,7 @@ masscan_app_selftest(void) {
         {PROTO_SIP, 41},
         {PROTO_SLP, 42},
         {PROTO_XDMCP, 43},
+        {PROTO_NATPMP, 44},
         {0,0}
     };
     size_t i;
@@ -177,6 +180,9 @@ masscan_app_selftest(void) {
         return 1;
     if (masscan_string_to_app("xdmcp") != PROTO_XDMCP ||
         strcmp(masscan_app_to_string(PROTO_XDMCP), "xdmcp") != 0)
+        return 1;
+    if (masscan_string_to_app("natpmp") != PROTO_NATPMP ||
+        strcmp(masscan_app_to_string(PROTO_NATPMP), "natpmp") != 0)
         return 1;
     return 0;
 }
