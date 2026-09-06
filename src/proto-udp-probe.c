@@ -14,6 +14,7 @@
 #include "proto-udp-ikev2.h"
 #include "proto-udp-stun.h"
 #include "proto-udp-onvif.h"
+#include "proto-udp-epm.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -868,6 +869,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {500, PROTO_IKEV2, ikev2_probe_prepare, ikev2_probe_classify},
     {3478, PROTO_STUN, stun_probe_prepare, NULL, stun_probe_classify},
     {3702, PROTO_ONVIF, onvif_probe_prepare, NULL, onvif_probe_classify},
+    {34964, PROTO_NONE, epm_probe_prepare, NULL, epm_probe_classify},
 #endif
     {0, PROTO_NONE, 0, 0}
 };
@@ -922,12 +924,15 @@ udp_probe_classify_target(unsigned port, const unsigned char *response,
         return PROTO_NONE;
 
     for (i = 0; udp_probe_catalog[i].port != 0; i++) {
+        int identified;
         if (udp_probe_catalog[i].port != port)
             continue;
-        if (udp_probe_catalog[i].classify_target ?
+        identified = udp_probe_catalog[i].classify_target ?
             udp_probe_catalog[i].classify_target(response, response_length, cookie, target) :
-            udp_probe_catalog[i].classify(response, response_length, cookie))
-            return udp_probe_catalog[i].protocol;
+            udp_probe_catalog[i].classify(response, response_length, cookie);
+        if (identified)
+            return udp_probe_catalog[i].protocol != PROTO_NONE ? udp_probe_catalog[i].protocol :
+                (enum ApplicationProtocol)identified;
         return PROTO_NONE;
     }
 
@@ -1033,6 +1038,65 @@ udp_probe_catalog_selftest(void)
         }
     }
 #ifdef UDP_EXTENDED_PROBES
+    {
+        struct UdpProbeTarget target;
+        unsigned char reply[300] = {0};
+        static const unsigned char tower[] =
+            "\x05\x00"
+            "\x13\x00\x0d\x01\x00\xa0\xde\x97\x6c\xd1\x11\x82\x71\x00\xa0\x24\x42\xdf\x7d\x01\x00\x02\x00\x00\x00"
+            "\x13\x00\x0d\x04\x5d\x88\x8a\xeb\x1c\xc9\x11\x9f\xe8\x08\x00\x2b\x10\x48\x60\x02\x00\x02\x00\x00\x00"
+            "\x01\x00\x0a\x02\x00\x00\x00\x01\x00\x08\x02\x00\x88\x94\x01\x00\x09\x04\x00\xc0\x00\x02\x01";
+        memset(&target, 0, sizeof(target));
+        target.source.version = target.destination.version = 4;
+        target.source.ipv4 = 0xc0000201; target.destination.ipv4 = 0xc6336401;
+        target.source_port = 40000;
+        if (!udp_probe_runtime_init() || !udp_probe_prepare(34964, cookie, &target, &result)) return 1;
+        memcpy(reply, result.payload, 80);
+        reply[1] = 2; reply[74] = 156;
+        reply[100] = reply[104] = reply[112] = 1;
+        reply[134] = 2; reply[140] = 2;
+        reply[144] = 'x'; reply[146] = reply[147] = 0xee;
+        reply[148] = reply[152] = 75;
+        memcpy(reply + 156, tower, sizeof(tower) - 1);
+        reply[231] = 0xbf;
+        if (udp_probe_classify_target(34964, reply, 236, cookie, &target) != PROTO_PNIO) return 1;
+        if (result.length != 156 || result.payload[2] != 8 ||
+            result.payload[68] != 2 || result.payload[74] != 76 || result.payload[152] != 1) return 1;
+        {
+            unsigned j;
+            unsigned char changed[300];
+            static const unsigned offsets[] = {
+                0, 1, 3, 4, 5, 6, 40, 47, 55, 64, 74, 76, 78,
+                100, 104, 108, 112, 136, 140, 145, 148, 152,
+                156, 158, 160, 161, 177, 179, 181, 183, 185,
+                186, 202, 204, 206, 208, 210, 211, 213, 215,
+                217, 218, 222, 224, 225, 232
+            };
+            for (j = 0; j < 236; j++)
+                if (udp_probe_classify_target(34964, reply, j, cookie, &target) != PROTO_NONE) return 1;
+            for (j = 0; j < sizeof(offsets) / sizeof(offsets[0]); j++) {
+                memcpy(changed, reply, sizeof(reply));
+                changed[offsets[j]] ^= 0x80;
+                if (udp_probe_classify_target(34964, changed, 236, cookie, &target) != PROTO_NONE) return 1;
+            }
+            if (udp_probe_classify_target(34964, reply, 236, cookie + 1, &target) != PROTO_NONE ||
+                udp_probe_classify(34964, reply, 236, cookie) != PROTO_NONE) return 1;
+            target.source_port++;
+            if (udp_probe_classify_target(34964, reply, 236, cookie, &target) != PROTO_NONE) return 1;
+            target.source_port--;
+            memcpy(changed, reply, sizeof(reply));
+            changed[2] = 0x28; changed[7] = 9; changed[56] = 3; changed[70] = 7; changed[79] = 1;
+            if (udp_probe_classify_target(34964, changed, 236, cookie, &target) != PROTO_PNIO) return 1;
+            changed[2] = 0x0c;
+            if (udp_probe_classify_target(34964, changed, 236, cookie, &target) != PROTO_NONE) return 1;
+            memcpy(changed, reply, sizeof(reply));
+            memcpy(changed + 161, "\x08\x83\xaf\xe1\x1f\x5d\xc9\x11\x91\xa4\x08\x00\x2b\x14\xa0\xfa", 16);
+            changed[177] = 3;
+            if (udp_probe_classify_target(34964, changed, 236, cookie, &target) != PROTO_EPM) return 1;
+            changed[134] = 0;
+            if (udp_probe_classify_target(34964, changed, 236, cookie, &target) != PROTO_NONE) return 1;
+        }
+    }
     {
         struct UdpProbeTarget target;
         char reply[2048], message_id[46];
