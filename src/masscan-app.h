@@ -53,6 +53,7 @@ enum ApplicationProtocol {
     PROTO_SLP,
     PROTO_XDMCP,
     PROTO_NATPMP,
+    PROTO_RPC,
 
     PROTO_end_of_list /* must be last one */
 };

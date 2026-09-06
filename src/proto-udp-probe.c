@@ -35,6 +35,13 @@ write_u32_be(unsigned char *dst, uint32_t value)
     dst[3] = (unsigned char)value;
 }
 
+static uint32_t
+read_u32_be(const unsigned char *src)
+{
+    return (uint32_t)src[0] << 24 | (uint32_t)src[1] << 16 |
+           (uint32_t)src[2] << 8 | src[3];
+}
+
 static int
 quic_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
              struct UdpPreparedProbe *result)
@@ -386,6 +393,50 @@ natpmp_classify(const unsigned char *response, unsigned length, uint64_t cookie)
            response[2] == 0 && response[3] <= 5;
 }
 
+static int
+rpc_probe_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+                  struct UdpPreparedProbe *result)
+{
+    (void)target;
+    memset(result->payload, 0, 40);
+    write_u32_be(result->payload, (uint32_t)cookie);
+    write_u32_be(result->payload + 8, 2);
+    write_u32_be(result->payload + 12, 100000);
+    write_u32_be(result->payload + 16, 2);
+    result->length = 40;
+    return 1;
+}
+
+static int
+rpc_probe_classify(const unsigned char *response, unsigned length, uint64_t cookie)
+{
+    unsigned offset, size, padded, status, i;
+    if (length < 20 || read_u32_be(response) != (uint32_t)cookie ||
+        read_u32_be(response + 4) != 1) return 0;
+    status = read_u32_be(response + 8);
+    if (status == 1) {
+        status = read_u32_be(response + 12);
+        if (status == 0)
+            return length == 24 && read_u32_be(response + 16) <= read_u32_be(response + 20);
+        return status == 1 && length == 20 && read_u32_be(response + 16) >= 1 &&
+               read_u32_be(response + 16) <= 14;
+    }
+    if (status != 0 || length < 24) return 0;
+    size = read_u32_be(response + 16);
+    if (size > 400) return 0;
+    padded = (size + 3) & ~3U;
+    offset = 20 + padded;
+    if (offset > length - 4) return 0;
+    for (i = 20 + size; i < offset; i++)
+        if (response[i] != 0) return 0;
+    status = read_u32_be(response + offset);
+    offset += 4;
+    if (status == 2)
+        return length - offset == 8 && read_u32_be(response + offset) <=
+               read_u32_be(response + offset + 4);
+    return status <= 5 && offset == length;
+}
+
 static const struct UdpProbeSpec udp_probe_catalog[] = {
     {80, PROTO_QUIC, quic_prepare, quic_classify},
     {6969, PROTO_BITTORRENT, bittorrent_prepare, bittorrent_classify},
@@ -397,6 +448,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {177, PROTO_XDMCP, xdmcp_prepare, xdmcp_classify},
     {123, PROTO_NTP, ntp_probe_prepare, ntp_probe_classify},
     {5351, PROTO_NATPMP, natpmp_prepare, natpmp_classify},
+    {111, PROTO_RPC, rpc_probe_prepare, rpc_probe_classify},
     {0, PROTO_NONE, 0, 0}
 };
 
@@ -479,6 +531,60 @@ udp_probe_catalog_selftest(void)
     };
     unsigned i;
 
+    {
+        unsigned char reply[425] = {
+            0x89, 0xab, 0xcd, 0xef, 0, 0, 0, 1,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0
+        };
+        if (udp_probe_classify(111, reply, 24, cookie) != PROTO_RPC)
+            return 1;
+        for (i = 0; i < 24; i++)
+            if (udp_probe_classify(111, reply, i, cookie) != PROTO_NONE) return 1;
+        if (udp_probe_classify(111, reply, 25, cookie) != PROTO_NONE ||
+            udp_probe_classify(111, reply, 24, cookie ^ 1) != PROTO_NONE) return 1;
+        for (i = 1; i <= 5; i++) {
+            reply[23] = (unsigned char)i;
+            if (i == 2) {
+                reply[27] = 1;
+                reply[31] = 2;
+                if (udp_probe_classify(111, reply, 32, cookie) != PROTO_RPC) return 1;
+                reply[27] = 3;
+                if (udp_probe_classify(111, reply, 32, cookie) != PROTO_NONE) return 1;
+                reply[27] = reply[31] = 0;
+            } else if (udp_probe_classify(111, reply, 24, cookie) != PROTO_RPC) return 1;
+        }
+        reply[23] = 6;
+        if (udp_probe_classify(111, reply, 24, cookie) != PROTO_NONE) return 1;
+        reply[23] = 0;
+        reply[19] = 1;
+        reply[20] = 0xa5;
+        if (udp_probe_classify(111, reply, 28, cookie) != PROTO_RPC) return 1;
+        reply[21] = 1;
+        if (udp_probe_classify(111, reply, 28, cookie) != PROTO_NONE) return 1;
+        memset(reply + 20, 0, sizeof(reply) - 20);
+        reply[18] = 1;
+        reply[19] = 144;
+        if (udp_probe_classify(111, reply, 424, cookie) != PROTO_RPC) return 1;
+        reply[19] = 145;
+        if (udp_probe_classify(111, reply, sizeof(reply), cookie) != PROTO_NONE) return 1;
+        memset(reply + 8, 0, sizeof(reply) - 8);
+        reply[11] = 1;
+        reply[19] = 2;
+        reply[23] = 3;
+        if (udp_probe_classify(111, reply, 24, cookie) != PROTO_RPC) return 1;
+        reply[15] = 1;
+        if (udp_probe_classify(111, reply, 20, cookie) != PROTO_RPC) return 1;
+        reply[19] = 15;
+        if (udp_probe_classify(111, reply, 20, cookie) != PROTO_NONE) return 1;
+        reply[11] = 2;
+        if (udp_probe_classify(111, reply, 24, cookie) != PROTO_NONE) return 1;
+        if (!udp_probe_prepare(111, cookie, NULL, &result) || result.length != 40 ||
+            memcmp(result.payload, "\x89\xab\xcd\xef\x00\x00\x00\x00"
+                   "\x00\x00\x00\x02\x00\x01\x86\xa0\x00\x00\x00\x02", 20)) return 1;
+        for (i = 20; i < 40; i++)
+            if (result.payload[i] != 0) return 1;
+    }
     {
         unsigned char reply[13] = {0, 128, 0, 0, 0, 0, 0, 1, 192, 0, 2, 1};
         if (udp_probe_classify(5351, reply, 12, cookie) != PROTO_NATPMP)
