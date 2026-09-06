@@ -660,6 +660,58 @@ gtpc_classify(const unsigned char *response, unsigned length, uint64_t cookie)
     return (seen & 1) != 0;
 }
 
+static int
+ipmsg_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+               struct UdpPreparedProbe *result)
+{
+    int length;
+    (void)target;
+    length = snprintf((char *)result->payload, sizeof(result->payload),
+                      "1:%u:scanner:scanner:64:", (unsigned)(uint32_t)cookie);
+    if (length < 0 || (unsigned)length >= sizeof(result->payload)) return 0;
+    result->length = (unsigned)length + 1;
+    return 1;
+}
+
+static int
+decimal_span(const unsigned char *data, unsigned length, uint64_t limit, uint64_t *value)
+{
+    unsigned i;
+    uint64_t number = 0;
+    if (length == 0) return 0;
+    for (i = 0; i < length; i++) {
+        unsigned digit = data[i] - '0';
+        if (digit > 9 || digit > limit || number > (limit - digit) / 10) return 0;
+        number = number * 10 + digit;
+    }
+    *value = number;
+    return 1;
+}
+
+static int
+ipmsg_classify(const unsigned char *response, unsigned length, uint64_t cookie)
+{
+    unsigned offset = 0, i;
+    uint64_t number;
+    (void)cookie;
+    if (length < 12 || response[length - 1] != 0) return 0;
+    for (i = 0; i < length - 1; i++)
+        if (response[i] < 32 || response[i] == 127) return 0;
+    for (i = 0; i < 5; i++) {
+        unsigned start = offset;
+        while (offset < length - 1 && response[offset] != ':') offset++;
+        if (offset == length - 1) return 0;
+        if (i == 0 && (!decimal_span(response + start, offset - start, 1, &number) || number != 1))
+            return 0;
+        if (i == 1 && !decimal_span(response + start, offset - start, UINT64_MAX, &number))
+            return 0;
+        if (i == 4 && (!decimal_span(response + start, offset - start, UINT32_MAX, &number) ||
+                      (number & 255) != 65)) return 0;
+        offset++;
+    }
+    return offset < length - 1;
+}
+
 static const struct UdpProbeSpec udp_probe_catalog[] = {
     {80, PROTO_QUIC, quic_prepare, quic_classify},
     {443, PROTO_QUIC, quic_prepare, quic_classify},
@@ -681,6 +733,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {5683, PROTO_COAP, coap_probe_prepare, coap_probe_classify},
     {7001, PROTO_AFS, afs_prepare, afs_classify},
     {2123, PROTO_GTPC, gtpc_prepare, gtpc_classify},
+    {2425, PROTO_IPMSG, ipmsg_prepare, ipmsg_classify},
     {0, PROTO_NONE, 0, 0}
 };
 
@@ -763,6 +816,33 @@ udp_probe_catalog_selftest(void)
     };
     unsigned i;
 
+    {
+        static const unsigned char reply[] = "1:42:node:host:65:IP Messenger 5.0";
+        if (udp_probe_classify(2425, reply, sizeof(reply), cookie) != PROTO_IPMSG)
+            return 1;
+        for (i = 0; i < sizeof(reply); i++)
+            if (udp_probe_classify(2425, reply, i, cookie) != PROTO_NONE) return 1;
+        {
+            static const char *bad[] = {
+                "2:42:node:host:65:version", "1::node:host:65:version",
+                "1:18446744073709551616:node:host:65:version",
+                "1:42:node:host:4294967361:version", "1:42:node:host:64:version",
+                "1:42:node:host:65:", "1:42:node:host:x:version", "1:42:node:host"
+            };
+            for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+                if (udp_probe_classify(2425, (const unsigned char *)bad[i],
+                                       (unsigned)strlen(bad[i]) + 1, cookie) != PROTO_NONE) return 1;
+        }
+        {
+            static const unsigned char extended[] = "1:18446744073709551615:u:h:321:Version: 2";
+            static const unsigned char embedded[] = "1:42:u:h:65:v\0more";
+            if (udp_probe_classify(2425, extended, sizeof(extended), cookie) != PROTO_IPMSG ||
+                udp_probe_classify(2425, embedded, sizeof(embedded), cookie) != PROTO_NONE) return 1;
+        }
+        if (!udp_probe_prepare(2425, 1, NULL, &result) ||
+            result.length != sizeof("1:1:scanner:scanner:64:") ||
+            memcmp(result.payload, "1:1:scanner:scanner:64:", result.length)) return 1;
+    }
     {
         unsigned char reply[24] = {
             0x40, 2, 0, 9, 0xab, 0xcd, 0xef, 0, 3, 0, 1, 0, 7
