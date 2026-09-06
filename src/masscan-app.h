@@ -82,6 +82,7 @@ enum ApplicationProtocol {
     PROTO_A2S,
     PROTO_PLEX,
     PROTO_TFTP_ERROR,
+    PROTO_UBIQUITI,
 
     PROTO_end_of_list /* must be last one */
 };

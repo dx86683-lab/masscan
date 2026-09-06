@@ -84,6 +84,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_A2S:              return "a2s";
     case PROTO_PLEX:             return "plex";
     case PROTO_TFTP_ERROR:       return "tftp-error";
+    case PROTO_UBIQUITI:         return "ubiquiti";
         
     case PROTO_ERROR:           return "error";
             
@@ -174,6 +175,7 @@ masscan_string_to_app(const char *str)
         {"a2s",         PROTO_A2S},
         {"plex",        PROTO_PLEX},
         {"tftp-error",  PROTO_TFTP_ERROR},
+        {"ubiquiti",    PROTO_UBIQUITI},
         {0,0}
     };
     size_t i;
@@ -232,6 +234,7 @@ masscan_app_selftest(void) {
         {PROTO_A2S, 71},
         {PROTO_PLEX, 72},
         {PROTO_TFTP_ERROR, 73},
+        {PROTO_UBIQUITI, 74},
         {0,0}
     };
     size_t i;

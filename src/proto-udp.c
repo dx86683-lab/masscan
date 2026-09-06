@@ -122,6 +122,10 @@ handle_udp(struct Output *out, time_t timestamp,
     }
 
     if (probe_protocol != PROTO_NONE) {
+        if (probe_protocol == PROTO_UBIQUITI) {
+            banner_data = (const unsigned char *)"discovery-response";
+            banner_length = 18;
+        }
         output_report_banner(out, timestamp, ip_them, 17, port_them,
                              probe_protocol, parsed->ip_ttl,
                              banner_data, banner_length);
@@ -438,6 +442,21 @@ proto_udp_selftest(void)
         }
         planned_ipv4.begin = 0; planned_ipv4.end = 0xffffffff;
         planned_ports.begin = Templ_UDP; planned_ports.end = Templ_UDP + 65535;
+    }
+    {
+        static const unsigned char discovery[] =
+            "\x01\x00\x00\x13\x01\x00\x06\x02\x00\x00\x00\x00\x01\x14\x00\x07" "TestBox";
+        parsed.port_src = 10001; parsed.app_length = sizeof(discovery) - 1;
+        memset(&udp_selftest_capture, 0, sizeof(udp_selftest_capture));
+        fp = tmpfile();
+        if (!fp) return 1;
+        out.fp = fp;
+        handle_udp(&out, 0, discovery, sizeof(discovery) - 1, &parsed, 7);
+        fclose(fp);
+        if (udp_selftest_capture.protocol != PROTO_UBIQUITI ||
+            udp_selftest_capture.banner_count != 1 || udp_selftest_capture.banner_length != 18) {
+            fprintf(stderr, "ubiquiti: discovery summary not emitted\n"); return 1;
+        }
     }
 #ifdef UDP_EXTENDED_PROBES
     parsed.port_src = 1194;

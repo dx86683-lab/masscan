@@ -21,6 +21,7 @@
 #include "proto-udp-a2s.h"
 #include "proto-udp-plex.h"
 #include "proto-udp-tftp.h"
+#include "proto-udp-ubiquiti.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -871,6 +872,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {5007, PROTO_SLMP, slmp_probe_prepare, slmp_probe_classify},
     {3333, PROTO_ENTTEC, enttec_probe_prepare, enttec_probe_classify},
     {27015, PROTO_A2S, a2s_probe_prepare, a2s_probe_classify},
+    {10001, PROTO_UBIQUITI, ubiquiti_probe_prepare, ubiquiti_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
     {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
@@ -1012,6 +1014,44 @@ udp_probe_catalog_selftest(void)
 {
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
+    {
+        static const unsigned char reply[] =
+            "\x01\x00\x00\x13\x01\x00\x06\x02\x00\x00\x00\x00\x01\x14\x00\x07" "TestBox";
+        if (udp_probe_classify(10001, reply, sizeof(reply) - 1, cookie) != PROTO_UBIQUITI) return 1;
+        {
+            unsigned char changed[64];
+            struct UdpPreparedProbe request;
+            unsigned n, length = sizeof(reply) - 1;
+            if (!udp_probe_prepare(10001, cookie, NULL, &request) || request.length != 4 ||
+                memcmp(request.payload, "\x01\x00\x00\x00", 4)) return 1;
+            for (n = 0; n < length; n++)
+                if (udp_probe_classify(10001, reply, n, cookie) != PROTO_NONE) return 1;
+            memcpy(changed, reply, length);
+            memcpy(changed + length, "\x0d\x00\x00", 3);
+            changed[3] += 3;
+            if (udp_probe_classify(10001, changed, length + 3, cookie) != PROTO_UBIQUITI) {
+                fprintf(stderr, "ubiquiti: empty optional text rejected\n"); return 1;
+            }
+            changed[length] = 0x80;
+            if (udp_probe_classify(10001, changed, length + 3, cookie) != PROTO_UBIQUITI) return 1;
+            changed[length] = 0x14;
+            if (udp_probe_classify(10001, changed, length + 3, cookie) != PROTO_NONE) return 1;
+            for (n = 0; n < 8; n++) {
+                memcpy(changed, reply, length);
+                switch (n) {
+                case 0: changed[0] = 2; break;
+                case 1: changed[1] = 1; break;
+                case 2: changed[3]--; break;
+                case 3: changed[6] = 5; break;
+                case 4: changed[7] = 3; break;
+                case 5: memset(changed + 7, 0, 6); break;
+                case 6: changed[13] = 0x80; break;
+                default: changed[18] = 0; break;
+                }
+                if (udp_probe_classify(10001, changed, length, cookie) != PROTO_NONE) return 1;
+            }
+        }
+    }
     {
         static const unsigned char reply[] =
             "\xff\xff\xff\xff\x49\x11" "Test\x00" "map\x00" "folder\x00" "Game\x00"
