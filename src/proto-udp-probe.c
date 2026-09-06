@@ -8,6 +8,7 @@
 #include "proto-udp-runtime.h"
 #include "proto-udp-dht.h"
 #include "proto-udp-jenkins.h"
+#include "proto-udp-dtls.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -854,6 +855,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
     {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
     {33848, PROTO_JENKINS, jenkins_probe_prepare, jenkins_probe_classify},
+    {3391, PROTO_DTLS, dtls_probe_prepare, dtls_probe_classify},
 #endif
     {0, PROTO_NONE, 0, 0}
 };
@@ -938,6 +940,75 @@ udp_probe_catalog_selftest(void)
     unsigned i;
 
 #ifdef UDP_EXTENDED_PROBES
+    {
+        static const unsigned char reply[] =
+            "\x16\xfe\xff\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10"
+            "\x03\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x04\xfe\xff\x01\x01";
+        if (udp_probe_classify(3391, reply, sizeof(reply) - 1, cookie) != PROTO_DTLS) return 1;
+        {
+            unsigned char flight[128] = {0};
+            /* A ServerHello selecting the offered RSA suite needs Certificate
+             * before ServerHelloDone in the same first flight. */
+            memcpy(flight, "\x16\xfe\xfd", 3);
+            flight[12] = 62;
+            flight[13] = 2;
+            flight[16] = flight[24] = 38;
+            flight[25] = 254; flight[26] = 253;
+            flight[61] = 47;
+            flight[63] = 14; flight[68] = 1;
+            if (udp_probe_classify(3391, flight, 75, cookie) != PROTO_NONE) return 1;
+            /* The standalone first ServerHello is a complete message. */
+            flight[12] = 50;
+            if (udp_probe_classify(3391, flight, 63, cookie) != PROTO_DTLS) return 1;
+            for (i = 0; i < 63; i++)
+                if (udp_probe_classify(3391, flight, i, cookie) != PROTO_NONE) return 1;
+            flight[61] = 48;
+            if (udp_probe_classify(3391, flight, 63, cookie) != PROTO_NONE) return 1;
+            flight[61] = 47;
+            flight[59] = 33;
+            if (udp_probe_classify(3391, flight, 63, cookie) != PROTO_NONE) return 1;
+            flight[59] = 0;
+            /* Certificate list framing, followed by ServerHelloDone. */
+            memset(flight + 63, 0, 65);
+            flight[12] = 81;
+            flight[63] = 11; flight[66] = 7; flight[68] = 1; flight[74] = 7;
+            flight[77] = 4; flight[80] = 1; flight[81] = 0x30;
+            flight[82] = 14; flight[87] = 2;
+            if (udp_probe_classify(3391, flight, 94, cookie) != PROTO_DTLS) return 1;
+            flight[80] = 2;
+            if (udp_probe_classify(3391, flight, 94, cookie) != PROTO_NONE) return 1;
+            flight[80] = 1;
+            /* The same messages split across two consecutive records. */
+            memmove(flight + 76, flight + 63, 31);
+            memcpy(flight + 63, flight, 13);
+            flight[12] = 50; flight[73] = 1; flight[75] = 31;
+            if (udp_probe_classify(3391, flight, 107, cookie) != PROTO_DTLS) return 1;
+            flight[73] = 2;
+            if (udp_probe_classify(3391, flight, 107, cookie) != PROTO_NONE) return 1;
+        }
+        {
+            static const unsigned offsets[] = {0, 1, 2, 3, 4, 5, 10, 12, 13, 16, 18, 21, 24, 25, 26, 27};
+            unsigned char changed[sizeof(reply)];
+            if (!udp_probe_runtime_init() || !udp_probe_prepare(3391, cookie, NULL, &result) ||
+                result.length != 67 ||
+                memcmp(result.payload, "\x16\xfe\xfd\x00\x00\x00\x00\x00\x00\x00\x00\x00\x36\x01\x00\x00\x2a\x00\x00\x00\x00\x00\x00\x00\x2a\xfe\xfd", 27) ||
+                memcmp(result.payload + 59, "\x00\x00\x00\x02\x00\x2f\x01\x00", 8)) return 1;
+            if (udp_probe_classify(3391, result.payload, result.length, cookie) != PROTO_NONE) return 1;
+            for (i = 0; i < sizeof(reply) - 1; i++)
+                if (udp_probe_classify(3391, reply, i, cookie) != PROTO_NONE) return 1;
+            for (i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++) {
+                memcpy(changed, reply, sizeof(reply));
+                changed[offsets[i]] ^= 0x40;
+                if (udp_probe_classify(3391, changed, sizeof(reply) - 1, cookie) != PROTO_NONE) return 1;
+            }
+            memcpy(changed, reply, sizeof(reply));
+            changed[2] = changed[26] = 253;
+            if (udp_probe_classify(3391, changed, sizeof(reply) - 1, cookie) != PROTO_DTLS) return 1;
+            if (udp_probe_classify(3391, changed, sizeof(reply), cookie) != PROTO_NONE) return 1;
+            changed[27] = 0;
+            if (udp_probe_classify(3391, changed, sizeof(reply) - 1, cookie) != PROTO_NONE) return 1;
+        }
+    }
     {
         static const unsigned char reply[] = "<hudson><version>2.218</version></hudson>";
         if (udp_probe_classify(33848, reply, sizeof(reply) - 1, cookie) != PROTO_JENKINS) return 1;
