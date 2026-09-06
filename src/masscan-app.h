@@ -88,6 +88,10 @@ enum ApplicationProtocol {
     PROTO_LANTRONIX,
     PROTO_DB2,
     PROTO_MOXA,
+    PROTO_DIGI,
+    PROTO_SQL_ANYWHERE,
+    PROTO_HIFLY,
+    PROTO_HID,
 
     PROTO_end_of_list /* must be last one */
 };

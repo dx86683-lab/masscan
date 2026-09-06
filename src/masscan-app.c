@@ -90,6 +90,10 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_LANTRONIX:        return "lantronix";
     case PROTO_DB2:              return "db2";
     case PROTO_MOXA:             return "moxa";
+    case PROTO_DIGI:             return "digi";
+    case PROTO_SQL_ANYWHERE:     return "sql-anywhere";
+    case PROTO_HIFLY:            return "hifly";
+    case PROTO_HID:              return "hid";
         
     case PROTO_ERROR:           return "error";
             
@@ -186,6 +190,10 @@ masscan_string_to_app(const char *str)
         {"lantronix",   PROTO_LANTRONIX},
         {"db2",         PROTO_DB2},
         {"moxa",        PROTO_MOXA},
+        {"digi",        PROTO_DIGI},
+        {"sql-anywhere",PROTO_SQL_ANYWHERE},
+        {"hifly",       PROTO_HIFLY},
+        {"hid",         PROTO_HID},
         {0,0}
     };
     size_t i;
@@ -250,6 +258,10 @@ masscan_app_selftest(void) {
         {PROTO_LANTRONIX, 77},
         {PROTO_DB2, 78},
         {PROTO_MOXA, 79},
+        {PROTO_DIGI, 80},
+        {PROTO_SQL_ANYWHERE, 81},
+        {PROTO_HIFLY, 82},
+        {PROTO_HID, 83},
         {0,0}
     };
     size_t i;

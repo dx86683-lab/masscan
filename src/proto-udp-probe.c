@@ -24,6 +24,7 @@
 #include "proto-udp-ubiquiti.h"
 #include "proto-udp-pcanywhere.h"
 #include "proto-udp-fixed-discovery.h"
+#include "proto-udp-structured-discovery.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -880,6 +881,10 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {30718, PROTO_LANTRONIX, lantronix_probe_prepare, lantronix_probe_classify},
     {523, PROTO_DB2, db2_probe_prepare, db2_probe_classify},
     {4800, PROTO_MOXA, moxa_probe_prepare, moxa_probe_classify},
+    {2362, PROTO_DIGI, digi_probe_prepare, digi_probe_classify},
+    {2638, PROTO_SQL_ANYWHERE, sql_anywhere_probe_prepare, sql_anywhere_probe_classify},
+    {48899, PROTO_HIFLY, hifly_probe_prepare, hifly_probe_classify},
+    {4070, PROTO_HID, hid_probe_prepare, hid_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
     {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
@@ -1021,6 +1026,85 @@ udp_probe_catalog_selftest(void)
 {
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
+    {
+        static const struct {
+            unsigned port, length;
+            enum ApplicationProtocol protocol;
+            const char *reply;
+        } fixtures[] = {
+            {2362, 25, PROTO_DIGI, "DIGI\x00\x02\x00\x11\x01\x06\x02\x00\x00\x00\x00\x01\x0d\x07" "TestBox"},
+            {2638, 64, PROTO_SQL_ANYWHERE,
+                "\x1b\x00\x00\x40\x00\x00\x00\x00\x12" "CONNECTIONLESS_TDS\x00"
+                "\x00\x00\x01\x01\x00\x04\x00\x05\x00\x05\x00\x03" "db\x00"
+                "\x01\x02\x0a\x4e\x03\x01\x02\x04\x08\x00\x00\x00\x00\x00\x00\x00\x00\x07\x02\x04\xb1"},
+            {48899, 35, PROTO_HIFLY, "192.0.2.10,020000000001,TEST-MODULE"},
+            {4070, 87, PROTO_HID, "discovered;087;00-06-8E-12-34-56;VertXController;192.0.2.1;2;V2000;2.2.7.18;02/27/2007;"}
+        };
+        unsigned f, n;
+        for (f = 0; f < sizeof(fixtures) / sizeof(*fixtures); f++) {
+            unsigned char changed[128];
+            unsigned length = fixtures[f].length, port = fixtures[f].port;
+            const unsigned char *reply = (const unsigned char *)fixtures[f].reply;
+            if (udp_probe_classify(port, reply, length, cookie) != fixtures[f].protocol) {
+                fprintf(stderr, "structured discovery: reply rejected on %u\n", port); return 1;
+            }
+            for (n = 0; n < (port == 48899 ? 25u : length); n++)
+                if (udp_probe_classify(port, reply, n, cookie) != PROTO_NONE) return 1;
+            memcpy(changed, reply, length); changed[length] = 0;
+            if (udp_probe_classify(port, changed, length + 1, cookie) != PROTO_NONE) return 1;
+            changed[0] = '!';
+            if (udp_probe_classify(port, changed, length, cookie) != PROTO_NONE) return 1;
+            if (!udp_probe_prepare(port, cookie, NULL, &result) ||
+                udp_probe_classify(port, result.payload, result.length, cookie) != PROTO_NONE) return 1;
+            if (port == 48899 && (result.length != 17 || memcmp(result.payload, "HF-A11ASSISTHREAD", 17))) {
+                fprintf(stderr, "hifly: discovery string truncated\n"); return 1;
+            }
+            if (port == 2638 && result.length != 61) return 1;
+            if (port == 4070 && (result.length != 13 || memcmp(result.payload, "discover;013;", 13))) return 1;
+            if (port == 2362 && (result.length != 14 || memcmp(result.payload,
+                "DIGI\x00\x01\x00\x06\xff\xff\xff\xff\xff\xff", 14))) return 1;
+            memcpy(changed, reply, length);
+            if (port == 2362) {
+                memcpy(changed + length, "\x11\x01\x03", 3); changed[7] += 3;
+                if (udp_probe_classify(port, changed, length + 3, cookie) != PROTO_NONE) return 1;
+                changed[length + 2] = 2;
+                if (udp_probe_classify(port, changed, length + 3, cookie) != PROTO_DIGI) return 1;
+                changed[length] = 0x80;
+                if (udp_probe_classify(port, changed, length + 3, cookie) != PROTO_DIGI) return 1;
+                changed[length] = 1;
+                if (udp_probe_classify(port, changed, length + 3, cookie) != PROTO_NONE) return 1;
+                memcpy(changed, reply, length); changed[10] = 3;
+                if (udp_probe_classify(port, changed, length, cookie) != PROTO_NONE) return 1;
+            } else if (port == 2638) {
+                static const unsigned offsets[] = {3, 8, 31, 39, 42, 43, 47, 63};
+                for (n = 0; n < sizeof(offsets) / sizeof(*offsets); n++) {
+                    memcpy(changed, reply, length); changed[offsets[n]] ^= 1;
+                    if (udp_probe_classify(port, changed, length, cookie) != PROTO_NONE) return 1;
+                }
+                memcpy(changed, reply, length); changed[45] = changed[46] = 0;
+                if (udp_probe_classify(port, changed, length, cookie) != PROTO_NONE) return 1;
+            } else if (port == 48899) {
+                static const char *bad[] = {"999.0.2.10,020000000001,TEST", "192.0.2.10,030000000001,TEST",
+                    "192.0.2.10,000000000000,TEST", "192.0.2.10,020000000001,TEST,EXTRA",
+                    "192.0.2.10,020000000001,TEST\r"};
+                for (n = 0; n < sizeof(bad) / sizeof(*bad); n++)
+                    if (udp_probe_classify(port, (const unsigned char *)bad[n], (unsigned)strlen(bad[n]), cookie) != PROTO_NONE) return 1;
+                memcpy(changed, reply, length); changed[length] = '\r'; changed[length + 1] = '\n';
+                if (udp_probe_classify(port, changed, length + 2, cookie) != PROTO_HIFLY) return 1;
+            } else {
+                static const unsigned offsets[] = {11, 15, 33, 47, 69, 75};
+                for (n = 0; n < sizeof(offsets) / sizeof(*offsets); n++) {
+                    memcpy(changed, reply, length); changed[offsets[n]] = '!';
+                    if (udp_probe_classify(port, changed, length, cookie) != PROTO_NONE) return 1;
+                }
+                memcpy(changed, reply, length);
+                memcpy(changed + length - 11, "02/29/2007", 10);
+                if (udp_probe_classify(port, changed, length, cookie) != PROTO_NONE) return 1;
+                changed[length - 2] = '8';
+                if (udp_probe_classify(port, changed, length, cookie) != PROTO_HID) return 1;
+            }
+        }
+    }
     {
         static const struct {
             unsigned port;

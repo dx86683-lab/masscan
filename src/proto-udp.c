@@ -124,7 +124,9 @@ handle_udp(struct Output *out, time_t timestamp,
     if (probe_protocol != PROTO_NONE) {
         if (probe_protocol == PROTO_UBIQUITI || probe_protocol == PROTO_PCANYWHERE ||
             probe_protocol == PROTO_SBUS || probe_protocol == PROTO_LANTRONIX ||
-            probe_protocol == PROTO_DB2 || probe_protocol == PROTO_MOXA) {
+            probe_protocol == PROTO_DB2 || probe_protocol == PROTO_MOXA ||
+            probe_protocol == PROTO_DIGI || probe_protocol == PROTO_SQL_ANYWHERE ||
+            probe_protocol == PROTO_HIFLY || probe_protocol == PROTO_HID) {
             banner_data = (const unsigned char *)"discovery-response";
             banner_length = 18;
         }
@@ -481,11 +483,18 @@ proto_udp_selftest(void)
             {523, 27, PROTO_DB2, "DB2RETADDR\x00" "SQL09070\x00" "dbhost\x00"},
             {4800, 24, PROTO_MOXA,
                 "\x81\x00\x00\x18\x00\x00\x00\x00\x00\x60\x00\x80\x50\x62\x00\x90\xe8\x00\x00\x01\xc0\x00\x02\x01"},
-            {5050, 12, PROTO_SBUS, "\x00\x00\x00\x0c\x00\x00\x00\x00\x01\x07\x00\x00"}
+            {5050, 12, PROTO_SBUS, "\x00\x00\x00\x0c\x00\x00\x00\x00\x01\x07\x00\x00"},
+            {2362, 25, PROTO_DIGI, "DIGI\x00\x02\x00\x11\x01\x06\x02\x00\x00\x00\x00\x01\x0d\x07" "TestBox"},
+            {2638, 64, PROTO_SQL_ANYWHERE,
+                "\x1b\x00\x00\x40\x00\x00\x00\x00\x12" "CONNECTIONLESS_TDS\x00"
+                "\x00\x00\x01\x01\x00\x04\x00\x05\x00\x05\x00\x03" "db\x00"
+                "\x01\x02\x0a\x4e\x03\x01\x02\x04\x08\x00\x00\x00\x00\x00\x00\x00\x00\x07\x02\x04\xb1"},
+            {48899, 35, PROTO_HIFLY, "192.0.2.10,020000000001,TEST-MODULE"},
+            {4070, 87, PROTO_HID, "discovered;087;00-06-8E-12-34-56;VertXController;192.0.2.1;2;V2000;2.2.7.18;02/27/2007;"}
         };
         unsigned f;
         for (f = 0; f < sizeof(fixtures) / sizeof(*fixtures); f++) {
-            unsigned char packet[64];
+            unsigned char packet[128];
             memcpy(packet, fixtures[f].reply, fixtures[f].length);
             parsed.port_src = fixtures[f].port; parsed.app_length = fixtures[f].length;
             if (parsed.port_src == 5050) {
