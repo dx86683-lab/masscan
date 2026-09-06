@@ -61,6 +61,7 @@ enum ApplicationProtocol {
     PROTO_GTPC,
     PROTO_IPMSG,
     PROTO_ENIP,
+    PROTO_MDNS,
 
     PROTO_end_of_list /* must be last one */
 };

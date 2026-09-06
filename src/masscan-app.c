@@ -63,6 +63,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_GTPC:             return "gtpc";
     case PROTO_IPMSG:            return "ipmsg";
     case PROTO_ENIP:             return "enip";
+    case PROTO_MDNS:             return "mdns";
         
     case PROTO_ERROR:           return "error";
             
@@ -132,6 +133,7 @@ masscan_string_to_app(const char *str)
         {"gtpc",        PROTO_GTPC},
         {"ipmsg",       PROTO_IPMSG},
         {"enip",        PROTO_ENIP},
+        {"mdns",        PROTO_MDNS},
         {0,0}
     };
     size_t i;
@@ -169,6 +171,7 @@ masscan_app_selftest(void) {
         {PROTO_GTPC, 50},
         {PROTO_IPMSG, 51},
         {PROTO_ENIP, 52},
+        {PROTO_MDNS, 53},
         {0,0}
     };
     size_t i;
@@ -231,6 +234,9 @@ masscan_app_selftest(void) {
         return 1;
     if (masscan_string_to_app("enip") != PROTO_ENIP ||
         strcmp(masscan_app_to_string(PROTO_ENIP), "enip") != 0)
+        return 1;
+    if (masscan_string_to_app("mdns") != PROTO_MDNS ||
+        strcmp(masscan_app_to_string(PROTO_MDNS), "mdns") != 0)
         return 1;
     return 0;
 }
