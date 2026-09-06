@@ -94,6 +94,7 @@ enum ApplicationProtocol {
     PROTO_HID,
     PROTO_GARDASOFT,
     PROTO_GARDASOFT_VERSION,
+    PROTO_VENTRILO,
 
     PROTO_end_of_list /* must be last one */
 };

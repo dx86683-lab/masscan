@@ -96,6 +96,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_HID:              return "hid";
     case PROTO_GARDASOFT:        return "gardasoft";
     case PROTO_GARDASOFT_VERSION:return "gardasoft-version";
+    case PROTO_VENTRILO:         return "ventrilo";
         
     case PROTO_ERROR:           return "error";
             
@@ -198,6 +199,7 @@ masscan_string_to_app(const char *str)
         {"hid",         PROTO_HID},
         {"gardasoft",   PROTO_GARDASOFT},
         {"gardasoft-version", PROTO_GARDASOFT_VERSION},
+        {"ventrilo",    PROTO_VENTRILO},
         {0,0}
     };
     size_t i;
@@ -268,6 +270,7 @@ masscan_app_selftest(void) {
         {PROTO_HID, 83},
         {PROTO_GARDASOFT, 84},
         {PROTO_GARDASOFT_VERSION, 85},
+        {PROTO_VENTRILO, 86},
         {0,0}
     };
     size_t i;

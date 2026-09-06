@@ -25,6 +25,7 @@
 #include "proto-udp-pcanywhere.h"
 #include "proto-udp-fixed-discovery.h"
 #include "proto-udp-structured-discovery.h"
+#include "proto-udp-ventrilo.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -887,6 +888,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {4070, PROTO_HID, hid_probe_prepare, hid_probe_classify},
     {30311, PROTO_GARDASOFT, gardasoft_probe_prepare, gardasoft_probe_classify},
     {30313, PROTO_GARDASOFT_VERSION, gardasoft_version_probe_prepare, gardasoft_version_probe_classify},
+    {3784, PROTO_VENTRILO, ventrilo_probe_prepare, ventrilo_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
     {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
@@ -1028,6 +1030,42 @@ udp_probe_catalog_selftest(void)
 {
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
+    {
+        static const unsigned char request[] =
+            "\x45\x01\xaf\x24\xde\x6a\xf5\xd9\x66\xef\x80\x08\x3c\x4e\x97\xc0\xf0\x66\x1d\xf6"
+            "\x8b\x80\x6a\x93\xe4\x49\x0f\x20\x43\x97\x69\xcd\x8e\x45\x31\x7c";
+        static const unsigned char reply[] =
+            "\x45\x01\xaf\x24\xde\x6a\xf5\xd9\x66\xf8\x80\x11\x3c\x4e\x97\xc0\xf0\x66\x81\xa1"
+            "\xd9\xc1\xb7\xd8\x1e\x69\x5b\x81\xa5\xa1\xbf\x12\xe0\x98\x7a\xcb\x39\xad\x7b\x98\xb0\x66\x23\x9b\x8e";
+        unsigned n;
+        unsigned char changed[sizeof(reply)];
+        {
+            static const struct { unsigned length; enum ApplicationProtocol protocol; const char *data; } cases[] = {
+                {30, PROTO_NONE,
+                    "\x45\x01\xaf\x24\xde\x6a\xf5\xd9\x66\xe9\x80\x02\x3c\x4e\x97\xc0\xf0\x66\xac\x7e\xd9\xc1\xb7\xd8\x1e\x69\x5b\x81\xa5\xa1"},
+                {52, PROTO_NONE,
+                    "\x45\x01\xaf\x24\xde\x6a\xf5\xd9\x66\xff\x80\x18\x3c\x4e\x97\xc0\xf0\x66\x0e\x1b\xd9\xc1\xb7\xd8\x1e\x69\x5b\x81\xa5\xa1\xbf\x12\xe0\x98\x7a\xcb\x39\xad\x7b\x98\x8c\x8c\x3a\xba\xd7\xd8\xa0\xef\xa6\xba\x9a\x48"},
+                {42, PROTO_VENTRILO,
+                    "\x45\x01\xaf\x24\xde\x6a\xf5\xd9\x66\xf5\x80\x0e\x3c\x4e\x97\xc0\xf0\x66\xe8\x76\xd9\xc1\xb7\xd8\x1e\x69\x5b\x81\xa5\xa1\xbf\x12\xe0\x98\x7a\xcb\x39\xad\x7b\x98\x8c\x36"},
+            };
+            for (n = 0; n < sizeof(cases) / sizeof(*cases); n++)
+                if (udp_probe_classify(3784, (const unsigned char *)cases[n].data,
+                    cases[n].length, 0x1234) != cases[n].protocol) return 1;
+        }
+        if (udp_probe_classify(3784, reply, sizeof(reply) - 1, 0x1234) != PROTO_VENTRILO) {
+            fprintf(stderr, "ventrilo: independent reply rejected\n"); return 1;
+        }
+        if (!udp_probe_prepare(3784, 0x1234, NULL, &result) || result.length != sizeof(request) - 1 ||
+            memcmp(result.payload, request, result.length)) return 1;
+        for (n = 0; n < sizeof(reply) - 1; n++) {
+            if (udp_probe_classify(3784, reply, n, 0x1234) != PROTO_NONE) return 1;
+            memcpy(changed, reply, sizeof(reply)); changed[n] ^= 1;
+            if (udp_probe_classify(3784, changed, sizeof(reply) - 1, 0x1234) != PROTO_NONE) return 1;
+        }
+        if (udp_probe_classify(3784, reply, sizeof(reply) - 1, 0x1235) != PROTO_NONE ||
+            udp_probe_classify(3784, reply, sizeof(reply), 0x1234) != PROTO_NONE ||
+            udp_probe_classify(3784, request, sizeof(request) - 1, 0x1234) != PROTO_NONE) return 1;
+    }
     {
         static const char discovery[] = "Gardasoft,PP420,000001,000B75000001,C0000201";
         static const char version[] = "PP420 (HW001) V002>";

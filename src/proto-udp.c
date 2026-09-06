@@ -127,7 +127,8 @@ handle_udp(struct Output *out, time_t timestamp,
             probe_protocol == PROTO_DB2 || probe_protocol == PROTO_MOXA ||
             probe_protocol == PROTO_DIGI || probe_protocol == PROTO_SQL_ANYWHERE ||
             probe_protocol == PROTO_HIFLY || probe_protocol == PROTO_HID ||
-            probe_protocol == PROTO_GARDASOFT || probe_protocol == PROTO_GARDASOFT_VERSION) {
+            probe_protocol == PROTO_GARDASOFT || probe_protocol == PROTO_GARDASOFT_VERSION ||
+            probe_protocol == PROTO_VENTRILO) {
             banner_data = (const unsigned char *)"discovery-response";
             banner_length = 18;
         }
@@ -493,13 +494,22 @@ proto_udp_selftest(void)
             {48899, 35, PROTO_HIFLY, "192.0.2.10,020000000001,TEST-MODULE"},
             {4070, 87, PROTO_HID, "discovered;087;00-06-8E-12-34-56;VertXController;192.0.2.1;2;V2000;2.2.7.18;02/27/2007;"},
             {30311, 44, PROTO_GARDASOFT, "Gardasoft,PP420,000001,000B75000001,C0000201"},
-            {30313, 19, PROTO_GARDASOFT_VERSION, "PP420 (HW001) V002>"}
+            {30313, 19, PROTO_GARDASOFT_VERSION, "PP420 (HW001) V002>"},
+            {3784, 45, PROTO_VENTRILO,
+                "\x45\x01\xaf\x24\xde\x6a\xf5\xd9\x66\xf8\x80\x11\x3c\x4e\x97\xc0\xf0\x66\x81\xa1"
+                "\xd9\xc1\xb7\xd8\x1e\x69\x5b\x81\xa5\xa1\xbf\x12\xe0\x98\x7a\xcb\x39\xad\x7b\x98\xb0\x66\x23\x9b\x8e"}
         };
         unsigned f;
         for (f = 0; f < sizeof(fixtures) / sizeof(*fixtures); f++) {
             unsigned char packet[128];
             memcpy(packet, fixtures[f].reply, fixtures[f].length);
             parsed.port_src = fixtures[f].port; parsed.app_length = fixtures[f].length;
+            if (parsed.port_src == 3784) {
+                cookie = syn_cookie(parsed.src_ip, 3784 | Templ_UDP,
+                                    parsed.dst_ip, parsed.port_dst, 7);
+                if (!udp_probe_prepare(3784, cookie, NULL, &request)) return 1;
+                memcpy(packet + 6, request.payload + 6, 2);
+            }
             if (parsed.port_src == 5050) {
                 unsigned crc = 0, i, b;
                 cookie = syn_cookie(parsed.src_ip, 5050 | Templ_UDP,
