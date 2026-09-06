@@ -1,5 +1,6 @@
 #include "proto-udp-probe.h"
 #include "proto-udp-sip.h"
+#include "proto-udp-snmpv3.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -775,6 +776,11 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {2123, PROTO_GTPC, gtpc_prepare, gtpc_classify},
     {2425, PROTO_IPMSG, ipmsg_prepare, ipmsg_classify},
     {44818, PROTO_ENIP, enip_prepare, enip_classify},
+    {161, PROTO_SNMP, snmpv3_probe_prepare, snmpv3_probe_classify},
+    {162, PROTO_SNMP, snmpv3_probe_prepare, snmpv3_probe_classify},
+    {391, PROTO_SNMP, snmpv3_probe_prepare, snmpv3_probe_classify},
+    {705, PROTO_SNMP, snmpv3_probe_prepare, snmpv3_probe_classify},
+    {1993, PROTO_SNMP, snmpv3_probe_prepare, snmpv3_probe_classify},
     {0, PROTO_NONE, 0, 0}
 };
 
@@ -857,6 +863,93 @@ udp_probe_catalog_selftest(void)
     };
     unsigned i;
 
+    {
+        static const unsigned char reply[] =
+            "\x30\x60\x02\x01\x03\x30\x10\x02\x04\x09\xab\xcd\xef\x02\x02\x05\xdc"
+            "\x04\x01\x00\x02\x01\x03\x04\x19\x30\x17\x04\x09\x80\x00\x00\x01\x04test"
+            "\x02\x01\x00\x02\x01\x00\x04\x00\x04\x00\x04\x00\x30\x2e\x04\x09"
+            "\x80\x00\x00\x01\x04test\x04\x00\xa8\x1f\x02\x04\x09\xab\xcd\xef"
+            "\x02\x01\x00\x02\x01\x00\x30\x11\x30\x0f\x06\x0a\x2b\x06\x01\x06"
+            "\x03\x0f\x01\x01\x04\x00\x41\x01\x01";
+        if (udp_probe_classify(161, reply, sizeof(reply) - 1, cookie) != PROTO_SNMP)
+            return 1;
+        {
+            static const unsigned ports[] = {161, 162, 391, 705, 1993};
+            static const unsigned char request[] =
+                "\x30\x3d\x02\x01\x03\x30\x10\x02\x04\x09\xab\xcd\xef"
+                "\x02\x02\x05\xdc\x04\x01\x04\x02\x01\x03"
+                "\x04\x10\x30\x0e\x04\x00\x02\x01\x00\x02\x01\x00\x04\x00\x04\x00\x04\x00"
+                "\x30\x14\x04\x00\x04\x00\xa0\x0e\x02\x04\x09\xab\xcd\xef"
+                "\x02\x01\x00\x02\x01\x00\x30\x00";
+            unsigned p;
+            unsigned char altered[104];
+            for (p = 0; p < sizeof(ports) / sizeof(ports[0]); p++) {
+                if (!udp_probe_prepare(ports[p], cookie, NULL, &result) ||
+                    result.length != sizeof(request) - 1 ||
+                    memcmp(result.payload, request, sizeof(request) - 1)) return 1;
+                if (udp_probe_classify(ports[p], reply, sizeof(reply) - 1, cookie) != PROTO_SNMP ||
+                    udp_probe_classify(ports[p], reply, sizeof(reply) - 1, cookie ^ 1) != PROTO_NONE ||
+                    udp_probe_classify(ports[p], reply, sizeof(reply), cookie) != PROTO_NONE) return 1;
+                for (i = 0; i < sizeof(reply) - 1; i++)
+                    if (udp_probe_classify(ports[p], reply, i, cookie) != PROTO_NONE) return 1;
+            }
+            {
+                static const unsigned offsets[] = {0, 4, 19, 22, 28, 54, 65, 72, 75, 78, 94, 95, 96};
+                for (i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++) {
+                    memcpy(altered, reply, sizeof(reply) - 1);
+                    altered[offsets[i]] ^= 1;
+                    if (udp_probe_classify(161, altered, sizeof(reply) - 1, cookie) != PROTO_NONE) return 1;
+                }
+            }
+            memcpy(altered, reply, 98);
+            altered[68] = 1;
+            altered[69] = 0;
+            memmove(altered + 70, altered + 73, 25);
+            altered[1] -= 3;
+            altered[51] -= 3;
+            altered[66] -= 3;
+            if (udp_probe_classify(161, altered, 95, cookie) != PROTO_SNMP) return 1;
+            memcpy(altered, reply, 98);
+            altered[53] = 0;
+            memmove(altered + 54, altered + 63, 35);
+            altered[1] -= 9;
+            altered[51] -= 9;
+            if (udp_probe_classify(161, altered, 89, cookie) != PROTO_SNMP) return 1;
+            memcpy(altered, reply, 98);
+            altered[1] = 0x81;
+            altered[2] = 0x60;
+            memcpy(altered + 3, reply + 2, 96);
+            if (udp_probe_classify(161, altered, 99, cookie) != PROTO_SNMP) return 1;
+            altered[1] = 0x80;
+            if (udp_probe_classify(161, altered, 99, cookie) != PROTO_NONE) return 1;
+            memcpy(altered, reply, 98);
+            altered[97] = 128;
+            if (udp_probe_classify(161, altered, 98, cookie) != PROTO_NONE) return 1;
+            altered[96] = 5;
+            memcpy(altered + 97, "\x00\xff\xff\xff\xff", 5);
+            altered[1] += 4;
+            altered[51] += 4;
+            altered[66] += 4;
+            altered[80] += 4;
+            altered[82] += 4;
+            if (udp_probe_classify(161, altered, 102, cookie) != PROTO_SNMP) return 1;
+            altered[97] = 1;
+            if (udp_probe_classify(161, altered, 102, cookie) != PROTO_NONE) return 1;
+            memcpy(altered, reply, 98);
+            memset(altered + 29, 0, 9);
+            if (udp_probe_classify(161, altered, 98, cookie) != PROTO_NONE) return 1;
+            memset(altered + 29, 255, 9);
+            if (udp_probe_classify(161, altered, 98, cookie) != PROTO_NONE) return 1;
+            if (!udp_probe_prepare(161, 0, NULL, &result) || result.length != 57 ||
+                memcmp(result.payload + 7, "\x02\x01\x00", 3)) return 1;
+            if (!udp_probe_prepare(161, 127, NULL, &result) || result.length != 57 ||
+                memcmp(result.payload + 7, "\x02\x01\x7f", 3)) return 1;
+            if (!udp_probe_prepare(161, 128, NULL, &result) || result.length != 59 ||
+                memcmp(result.payload + 7, "\x02\x02\x00\x80", 4)) return 1;
+            if (!udp_probe_prepare(161, 0x7fffffff, NULL, &result) || result.length != 63 ||
+                memcmp(result.payload + 7, "\x02\x04\x7f\xff\xff\xff", 6)) return 1;
+        }
+    }
     {
         unsigned char reply[70] = {0};
         reply[0] = 0x63;
