@@ -71,6 +71,7 @@ enum ApplicationProtocol {
     PROTO_DTLS,
     PROTO_L2TP,
     PROTO_IKEV1,
+    PROTO_IKEV2,
 
     PROTO_end_of_list /* must be last one */
 };
