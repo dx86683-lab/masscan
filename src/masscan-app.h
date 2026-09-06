@@ -95,6 +95,8 @@ enum ApplicationProtocol {
     PROTO_GARDASOFT,
     PROTO_GARDASOFT_VERSION,
     PROTO_VENTRILO,
+    PROTO_SERIALNUMBERD,
+    PROTO_HIKVISION,
 
     PROTO_end_of_list /* must be last one */
 };

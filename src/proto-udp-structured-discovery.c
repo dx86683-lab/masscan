@@ -1,4 +1,5 @@
 #include "proto-udp-structured-discovery.h"
+#include "proto-udp-discovery-fields.h"
 #include <string.h>
 
 static int
@@ -118,8 +119,8 @@ discovery_decimal(const unsigned char *data, unsigned length, unsigned *result)
     return 1;
 }
 
-static int
-discovery_ipv4(const unsigned char *data, unsigned length)
+int
+udp_discovery_ipv4(const unsigned char *data, unsigned length)
 {
     unsigned start = 0, i, fields = 0;
     for (i = 0; i <= length; i++) {
@@ -141,8 +142,8 @@ discovery_hex(unsigned c)
     return -1;
 }
 
-static int
-discovery_mac_text(const unsigned char *data, unsigned length)
+int
+udp_discovery_mac_text(const unsigned char *data, unsigned length)
 {
     unsigned char mac[6];
     unsigned i, step;
@@ -183,7 +184,7 @@ hifly_probe_classify(const unsigned char *data, unsigned length, uint64_t cookie
         else return 0;
     }
     return first && second == first + 13 && second + 1 < length &&
-        discovery_ipv4(data, first) && discovery_mac_text(data + first + 1, 12) &&
+        udp_discovery_ipv4(data, first) && udp_discovery_mac_text(data + first + 1, 12) &&
         discovery_ascii(data + second + 1, length - second - 1);
 }
 
@@ -211,9 +212,9 @@ hid_probe_classify(const unsigned char *data, unsigned length, uint64_t cookie)
     }
     if (count != 9 || size[0] != 10 || memcmp(field[0], "discovered", 10) ||
         size[1] != 3 || !discovery_decimal(field[1], 3, &declared) || declared != length ||
-        size[2] != 17 || !discovery_mac_text(field[2], 17) ||
+        size[2] != 17 || !udp_discovery_mac_text(field[2], 17) ||
         size[3] != 15 || memcmp(field[3], "VertXController", 15) ||
-        !discovery_ipv4(field[4], size[4]) || size[5] != 1 || field[5][0] != '2' ||
+        !udp_discovery_ipv4(field[4], size[4]) || size[5] != 1 || field[5][0] != '2' ||
         !discovery_ascii(field[6], size[6]) || size[7] > 64 || size[8] != 10) return 0;
     for (i = 0; i < size[7]; i++) {
         unsigned c = field[7][i];
@@ -250,7 +251,7 @@ gardasoft_probe_classify(const unsigned char *data, unsigned length, uint64_t co
     else return 0;
     for (i = 0; i < 6; i++) if (data[offset + i] < '0' || data[offset + i] > '9') return 0;
     offset += 6;
-    if (data[offset] != ',' || !discovery_mac_text(data + offset + 1, 12) || data[offset + 13] != ',') return 0;
+    if (data[offset] != ',' || !udp_discovery_mac_text(data + offset + 1, 12) || data[offset + 13] != ',') return 0;
     offset += 14;
     for (i = 0; i < 8; i++) if (discovery_hex(data[offset + i]) < 0) return 0;
     return 1;

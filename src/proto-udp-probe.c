@@ -26,6 +26,7 @@
 #include "proto-udp-fixed-discovery.h"
 #include "proto-udp-structured-discovery.h"
 #include "proto-udp-ventrilo.h"
+#include "proto-udp-text-discovery.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -889,7 +890,9 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {30311, PROTO_GARDASOFT, gardasoft_probe_prepare, gardasoft_probe_classify},
     {30313, PROTO_GARDASOFT_VERSION, gardasoft_version_probe_prepare, gardasoft_version_probe_classify},
     {3784, PROTO_VENTRILO, ventrilo_probe_prepare, ventrilo_probe_classify},
+    {626, PROTO_SERIALNUMBERD, serialnumberd_probe_prepare, serialnumberd_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
+    {37020, PROTO_HIKVISION, hikvision_probe_prepare, hikvision_probe_classify},
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
     {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
     {33848, PROTO_JENKINS, jenkins_probe_prepare, jenkins_probe_classify},
@@ -1030,6 +1033,66 @@ udp_probe_catalog_selftest(void)
 {
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
+    {
+        static const unsigned char reply[] = "SNRESPS:lab:0x1111111111111111111111111111111111111111:xsvr:"
+            "0x2222222222222222222222222222222222222222:0x1234abcd:"
+            "0x3333333333333333333333333333333333333333:lab";
+        unsigned n;
+        unsigned char changed[sizeof(reply) + 1];
+        if (udp_probe_classify(626, reply, sizeof(reply), cookie) != PROTO_SERIALNUMBERD) {
+            fprintf(stderr, "serialnumberd: complete reply rejected\n"); return 1;
+        }
+        if (!udp_probe_prepare(626, cookie, NULL, &result) || result.length != strlen("SNQUERY: 127.0.0.1:AAAAAA:xsvr") ||
+            memcmp(result.payload, "SNQUERY: 127.0.0.1:AAAAAA:xsvr", result.length)) return 1;
+        for (n = 0; n < sizeof(reply); n++)
+            if (udp_probe_classify(626, reply, n, cookie) != PROTO_NONE) return 1;
+        memcpy(changed, reply, sizeof(reply)); changed[sizeof(reply)] = 0;
+        if (udp_probe_classify(626, changed, sizeof(changed), cookie) != PROTO_NONE) return 1;
+        changed[sizeof(reply) - 2] = 'x';
+        if (udp_probe_classify(626, changed, sizeof(reply), cookie) != PROTO_NONE) return 1;
+        memcpy(changed, reply, sizeof(reply)); changed[16] = 'g';
+        if (udp_probe_classify(626, changed, sizeof(reply), cookie) != PROTO_NONE) return 1;
+    }
+#ifdef UDP_EXTENDED_PROBES
+    {
+        static const char reply[] = "<ProbeMatch><Types>inquiry</Types><MAC>02:00:00:00:00:01</MAC>"
+            "<DeviceDescription>Test Camera</DeviceDescription><IPv4Address>192.0.2.1</IPv4Address></ProbeMatch>";
+        static const char *bad[] = {
+            "<Probe><MAC>02:00:00:00:00:01</MAC><DeviceType>Test</DeviceType></Probe>",
+            "<ProbeMatch><MAC>03:00:00:00:00:01</MAC><DeviceType>Test</DeviceType></ProbeMatch>",
+            "<ProbeMatch><MAC>02:00:00:00:00:01</MAC><MAC>02:00:00:00:00:01</MAC><DeviceType>Test</DeviceType></ProbeMatch>",
+            "<ProbeMatch><MAC>02:00:00:00:00:01</MAC></ProbeMatch>",
+            "<ProbeMatch><Types>update</Types><MAC>02:00:00:00:00:01</MAC><DeviceType>Test</DeviceType></ProbeMatch>",
+            "<!DOCTYPE ProbeMatch [<!ENTITY x 'camera'>]><ProbeMatch><MAC>02:00:00:00:00:01</MAC><DeviceType>&x;</DeviceType></ProbeMatch>"
+            ,"<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><ProbeMatch><MAC>02:00:00:00:00:01</MAC><DeviceType>Test</DeviceType></ProbeMatch>"
+            ,"<ProbeMatch><MAC>02:00:00:00:00:01</MAC><DeviceType>Test</DeviceType><IPv4Address>999.0.0.1</IPv4Address></ProbeMatch>"
+            ,"<ProbeMatch><MAC>02:00:00:00:00:01</MAC><DeviceType>Test</DeviceType><HttpPort>65536</HttpPort></ProbeMatch>"
+            ,"<ProbeMatch><MAC>02:00:00:00:00:01</MAC><DeviceType>Test</DeviceType></ProbeMatch><Other/>"
+            ,"<ProbeMatch><a><a><a><a><a><a><a><a/></a></a></a></a></a></a></a></ProbeMatch>"
+        };
+        unsigned n;
+        if (udp_probe_classify(37020, (const unsigned char *)reply, sizeof(reply) - 1, cookie) != PROTO_HIKVISION) {
+            fprintf(stderr, "hikvision: complete XML rejected\n"); return 1;
+        }
+        for (n = 0; n < sizeof(reply) - 1; n++)
+            if (udp_probe_classify(37020, (const unsigned char *)reply, n, cookie) != PROTO_NONE) return 1;
+        for (n = 0; n < sizeof(bad) / sizeof(*bad); n++)
+            if (udp_probe_classify(37020, (const unsigned char *)bad[n], (unsigned)strlen(bad[n]), cookie) != PROTO_NONE) {
+                fprintf(stderr, "hikvision: invalid XML accepted at %u\n", n); return 1;
+            }
+        {
+            struct UdpProbeTarget target = {0};
+            struct UdpPreparedProbe second;
+            target.source.version = target.destination.version = 4;
+            target.source.ipv4 = 0xc0000201; target.destination.ipv4 = 0xc6336401; target.source_port = 40000;
+            if (!udp_probe_prepare(37020, cookie, &target, &result) ||
+                !strstr((const char *)result.payload, "<Types>inquiry</Types>")) return 1;
+            target.destination.ipv4++;
+            if (!udp_probe_prepare(37020, cookie, &target, &second) ||
+                result.length != second.length || !memcmp(result.payload, second.payload, result.length)) return 1;
+        }
+    }
+#endif
     {
         static const unsigned char request[] =
             "\x45\x01\xaf\x24\xde\x6a\xf5\xd9\x66\xef\x80\x08\x3c\x4e\x97\xc0\xf0\x66\x1d\xf6"

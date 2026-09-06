@@ -128,7 +128,8 @@ handle_udp(struct Output *out, time_t timestamp,
             probe_protocol == PROTO_DIGI || probe_protocol == PROTO_SQL_ANYWHERE ||
             probe_protocol == PROTO_HIFLY || probe_protocol == PROTO_HID ||
             probe_protocol == PROTO_GARDASOFT || probe_protocol == PROTO_GARDASOFT_VERSION ||
-            probe_protocol == PROTO_VENTRILO) {
+            probe_protocol == PROTO_VENTRILO || probe_protocol == PROTO_SERIALNUMBERD ||
+            probe_protocol == PROTO_HIKVISION) {
             banner_data = (const unsigned char *)"discovery-response";
             banner_length = 18;
         }
@@ -474,6 +475,12 @@ proto_udp_selftest(void)
             udp_selftest_capture.banner_count != 1 || udp_selftest_capture.banner_length != 18) return 1;
     }
     {
+        static const char serial_reply[] = "SNRESPS:lab:0x1111111111111111111111111111111111111111:xsvr:"
+            "0x2222222222222222222222222222222222222222:0x1234abcd:"
+            "0x3333333333333333333333333333333333333333:lab";
+#ifdef UDP_EXTENDED_PROBES
+        static const char sadp_reply[] = "<ProbeMatch><MAC>02:00:00:00:00:01</MAC><DeviceType>Test</DeviceType></ProbeMatch>";
+#endif
         static const struct {
             unsigned port, length;
             enum ApplicationProtocol protocol;
@@ -497,11 +504,15 @@ proto_udp_selftest(void)
             {30313, 19, PROTO_GARDASOFT_VERSION, "PP420 (HW001) V002>"},
             {3784, 45, PROTO_VENTRILO,
                 "\x45\x01\xaf\x24\xde\x6a\xf5\xd9\x66\xf8\x80\x11\x3c\x4e\x97\xc0\xf0\x66\x81\xa1"
-                "\xd9\xc1\xb7\xd8\x1e\x69\x5b\x81\xa5\xa1\xbf\x12\xe0\x98\x7a\xcb\x39\xad\x7b\x98\xb0\x66\x23\x9b\x8e"}
+                "\xd9\xc1\xb7\xd8\x1e\x69\x5b\x81\xa5\xa1\xbf\x12\xe0\x98\x7a\xcb\x39\xad\x7b\x98\xb0\x66\x23\x9b\x8e"},
+            {626, sizeof(serial_reply), PROTO_SERIALNUMBERD, serial_reply},
+#ifdef UDP_EXTENDED_PROBES
+            {37020, sizeof(sadp_reply) - 1, PROTO_HIKVISION, sadp_reply},
+#endif
         };
         unsigned f;
         for (f = 0; f < sizeof(fixtures) / sizeof(*fixtures); f++) {
-            unsigned char packet[128];
+            unsigned char packet[1024];
             memcpy(packet, fixtures[f].reply, fixtures[f].length);
             parsed.port_src = fixtures[f].port; parsed.app_length = fixtures[f].length;
             if (parsed.port_src == 3784) {
