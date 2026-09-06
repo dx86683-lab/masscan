@@ -86,6 +86,10 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_TFTP_ERROR:       return "tftp-error";
     case PROTO_UBIQUITI:         return "ubiquiti";
     case PROTO_PCANYWHERE:       return "pcanywhere";
+    case PROTO_SBUS:             return "sbus";
+    case PROTO_LANTRONIX:        return "lantronix";
+    case PROTO_DB2:              return "db2";
+    case PROTO_MOXA:             return "moxa";
         
     case PROTO_ERROR:           return "error";
             
@@ -178,6 +182,10 @@ masscan_string_to_app(const char *str)
         {"tftp-error",  PROTO_TFTP_ERROR},
         {"ubiquiti",    PROTO_UBIQUITI},
         {"pcanywhere",  PROTO_PCANYWHERE},
+        {"sbus",        PROTO_SBUS},
+        {"lantronix",   PROTO_LANTRONIX},
+        {"db2",         PROTO_DB2},
+        {"moxa",        PROTO_MOXA},
         {0,0}
     };
     size_t i;
@@ -238,6 +246,10 @@ masscan_app_selftest(void) {
         {PROTO_TFTP_ERROR, 73},
         {PROTO_UBIQUITI, 74},
         {PROTO_PCANYWHERE, 75},
+        {PROTO_SBUS, 76},
+        {PROTO_LANTRONIX, 77},
+        {PROTO_DB2, 78},
+        {PROTO_MOXA, 79},
         {0,0}
     };
     size_t i;

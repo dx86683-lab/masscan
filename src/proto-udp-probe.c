@@ -23,6 +23,7 @@
 #include "proto-udp-tftp.h"
 #include "proto-udp-ubiquiti.h"
 #include "proto-udp-pcanywhere.h"
+#include "proto-udp-fixed-discovery.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -875,6 +876,10 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {27015, PROTO_A2S, a2s_probe_prepare, a2s_probe_classify},
     {10001, PROTO_UBIQUITI, ubiquiti_probe_prepare, ubiquiti_probe_classify},
     {5632, PROTO_PCANYWHERE, pcanywhere_probe_prepare, pcanywhere_probe_classify},
+    {5050, PROTO_SBUS, sbus_probe_prepare, sbus_probe_classify},
+    {30718, PROTO_LANTRONIX, lantronix_probe_prepare, lantronix_probe_classify},
+    {523, PROTO_DB2, db2_probe_prepare, db2_probe_classify},
+    {4800, PROTO_MOXA, moxa_probe_prepare, moxa_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
     {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
@@ -1016,6 +1021,71 @@ udp_probe_catalog_selftest(void)
 {
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
+    {
+        static const struct {
+            unsigned port;
+            enum ApplicationProtocol protocol;
+            const char *query, *reply;
+            unsigned query_length, reply_length;
+        } fixtures[] = {
+            {5050, PROTO_SBUS, "\x00\x00\x00\x0d\x00\x00\x12\x34\x00\xff\x1d\x30\xc6",
+                "\x00\x00\x00\x0c\x00\x00\x12\x34\x01\x07\xfe\x17", 13, 12},
+            {30718, PROTO_LANTRONIX, "\x00\x00\x00\xf6",
+                "\x00\x00\x00\xf7\x00\x00\x00\x00\x33\x51\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+                "\x00\x00\x00\x00\x00\x20\x4a\x12\x34\x56", 4, 30},
+            {523, PROTO_DB2, "DB2GETADDR\x00" "SQL09010\x00",
+                "DB2RETADDR\x00" "SQL09070\x00" "dbhost\x00", 20, 27},
+            {4800, PROTO_MOXA, "\x01\x00\x00\x08\x00\x00\x00\x00",
+                "\x81\x00\x00\x18\x00\x00\x00\x00\x00\x60\x00\x80\x50\x62\x00\x90\xe8\x00\x00\x01\xc0\x00\x02\x01", 8, 24}
+        };
+        unsigned f, n;
+        for (f = 0; f < sizeof(fixtures) / sizeof(*fixtures); f++) {
+            unsigned char changed[64];
+            const unsigned char *reply = (const unsigned char *)fixtures[f].reply;
+            unsigned port = fixtures[f].port, length = fixtures[f].reply_length;
+            if (udp_probe_classify(port, reply, length, 0x1234) != fixtures[f].protocol) {
+                fprintf(stderr, "discovery: complete reply rejected on %u\n", port); return 1;
+            }
+            if (!udp_probe_prepare(port, 0x1234, NULL, &result) || result.length != fixtures[f].query_length ||
+                memcmp(result.payload, fixtures[f].query, result.length)) return 1;
+            for (n = 0; n < length; n++)
+                if (udp_probe_classify(port, reply, n, 0x1234) != PROTO_NONE) return 1;
+            memcpy(changed, reply, length); changed[length] = 0;
+            if (udp_probe_classify(port, changed, length + 1, 0x1234) != PROTO_NONE) return 1;
+            changed[0] ^= 1;
+            if (udp_probe_classify(port, changed, length, 0x1234) != PROTO_NONE) return 1;
+            if (udp_probe_classify(port, result.payload, result.length, 0x1234) != PROTO_NONE) return 1;
+            memcpy(changed, reply, length);
+            if (port == 5050) {
+                static const unsigned char wrong_id[] = "\x00\x00\x00\x0c\x00\x00\x12\x34\x01\x07\xfe\x17";
+                if (udp_probe_classify(port, wrong_id, 12, 0x1235) != PROTO_NONE) return 1;
+                for (n = 0; n < length; n++) {
+                    memcpy(changed, reply, length); changed[n] ^= 1;
+                    if (udp_probe_classify(port, changed, length, 0x1234) != PROTO_NONE) return 1;
+                }
+            } else if (port == 30718) {
+                changed[24] |= 1;
+                if (udp_probe_classify(port, changed, length, 0x1234) != PROTO_NONE) return 1;
+                memset(changed + 24, 0, 6);
+                if (udp_probe_classify(port, changed, length, 0x1234) != PROTO_NONE) return 1;
+            } else if (port == 523) {
+                static const unsigned offsets[] = {10, 14, 19, 20, 26};
+                for (n = 0; n < sizeof(offsets) / sizeof(*offsets); n++) {
+                    memcpy(changed, reply, length); changed[offsets[n]] = '!';
+                    if (udp_probe_classify(port, changed, length, 0x1234) != PROTO_NONE) return 1;
+                }
+                memcpy(changed, reply, length); changed[23] = 0;
+                if (udp_probe_classify(port, changed, length, 0x1234) != PROTO_NONE) return 1;
+            } else {
+                changed[1] = 4;
+                if (udp_probe_classify(port, changed, length, 0x1234) != PROTO_NONE) return 1;
+                memcpy(changed, reply, length); changed[14] = 2;
+                if (udp_probe_classify(port, changed, length, 0x1234) != PROTO_NONE) return 1;
+                memcpy(changed, reply, length); changed[3]--;
+                if (udp_probe_classify(port, changed, length, 0x1234) != PROTO_NONE) return 1;
+            }
+        }
+    }
     {
         static const unsigned char padded[] = "NRLAB___AHM_3___";
         static const unsigned char plain[] = "NRLABAHM_3___";

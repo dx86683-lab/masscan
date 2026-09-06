@@ -122,7 +122,9 @@ handle_udp(struct Output *out, time_t timestamp,
     }
 
     if (probe_protocol != PROTO_NONE) {
-        if (probe_protocol == PROTO_UBIQUITI || probe_protocol == PROTO_PCANYWHERE) {
+        if (probe_protocol == PROTO_UBIQUITI || probe_protocol == PROTO_PCANYWHERE ||
+            probe_protocol == PROTO_SBUS || probe_protocol == PROTO_LANTRONIX ||
+            probe_protocol == PROTO_DB2 || probe_protocol == PROTO_MOXA) {
             banner_data = (const unsigned char *)"discovery-response";
             banner_length = 18;
         }
@@ -466,6 +468,46 @@ proto_udp_selftest(void)
         fclose(fp);
         if (udp_selftest_capture.protocol != PROTO_PCANYWHERE ||
             udp_selftest_capture.banner_count != 1 || udp_selftest_capture.banner_length != 18) return 1;
+    }
+    {
+        static const struct {
+            unsigned port, length;
+            enum ApplicationProtocol protocol;
+            const char *reply;
+        } fixtures[] = {
+            {30718, 30, PROTO_LANTRONIX,
+                "\x00\x00\x00\xf7\x00\x00\x00\x00\x33\x51\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+                "\x00\x00\x00\x00\x00\x20\x4a\x12\x34\x56"},
+            {523, 27, PROTO_DB2, "DB2RETADDR\x00" "SQL09070\x00" "dbhost\x00"},
+            {4800, 24, PROTO_MOXA,
+                "\x81\x00\x00\x18\x00\x00\x00\x00\x00\x60\x00\x80\x50\x62\x00\x90\xe8\x00\x00\x01\xc0\x00\x02\x01"},
+            {5050, 12, PROTO_SBUS, "\x00\x00\x00\x0c\x00\x00\x00\x00\x01\x07\x00\x00"}
+        };
+        unsigned f;
+        for (f = 0; f < sizeof(fixtures) / sizeof(*fixtures); f++) {
+            unsigned char packet[64];
+            memcpy(packet, fixtures[f].reply, fixtures[f].length);
+            parsed.port_src = fixtures[f].port; parsed.app_length = fixtures[f].length;
+            if (parsed.port_src == 5050) {
+                unsigned crc = 0, i, b;
+                cookie = syn_cookie(parsed.src_ip, 5050 | Templ_UDP,
+                                    parsed.dst_ip, parsed.port_dst, 7);
+                packet[6] = (unsigned char)(cookie >> 8); packet[7] = (unsigned char)cookie;
+                for (i = 0; i < 10; i++) {
+                    crc ^= (unsigned)packet[i] << 8;
+                    for (b = 0; b < 8; b++) crc = ((crc << 1) ^ ((crc & 0x8000) ? 0x1021 : 0)) & 0xffff;
+                }
+                packet[10] = (unsigned char)(crc >> 8); packet[11] = (unsigned char)crc;
+            }
+            memset(&udp_selftest_capture, 0, sizeof(udp_selftest_capture));
+            fp = tmpfile();
+            if (!fp) return 1;
+            out.fp = fp;
+            handle_udp(&out, 0, packet, fixtures[f].length, &parsed, 7);
+            fclose(fp);
+            if (udp_selftest_capture.protocol != fixtures[f].protocol ||
+                udp_selftest_capture.banner_count != 1 || udp_selftest_capture.banner_length != 18) return 1;
+        }
     }
 #ifdef UDP_EXTENDED_PROBES
     parsed.port_src = 1194;

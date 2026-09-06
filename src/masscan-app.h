@@ -84,6 +84,10 @@ enum ApplicationProtocol {
     PROTO_TFTP_ERROR,
     PROTO_UBIQUITI,
     PROTO_PCANYWHERE,
+    PROTO_SBUS,
+    PROTO_LANTRONIX,
+    PROTO_DB2,
+    PROTO_MOXA,
 
     PROTO_end_of_list /* must be last one */
 };
