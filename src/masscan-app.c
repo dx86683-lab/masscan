@@ -57,6 +57,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_NATPMP:           return "natpmp";
     case PROTO_RPC:              return "rpc";
     case PROTO_GTPU:             return "gtpu";
+    case PROTO_RIP:              return "rip";
         
     case PROTO_ERROR:           return "error";
             
@@ -120,6 +121,7 @@ masscan_string_to_app(const char *str)
         {"natpmp",      PROTO_NATPMP},
         {"rpc",         PROTO_RPC},
         {"gtpu",        PROTO_GTPU},
+        {"rip",         PROTO_RIP},
         {0,0}
     };
     size_t i;
@@ -151,6 +153,7 @@ masscan_app_selftest(void) {
         {PROTO_NATPMP, 44},
         {PROTO_RPC, 45},
         {PROTO_GTPU, 46},
+        {PROTO_RIP, 47},
         {0,0}
     };
     size_t i;
@@ -195,6 +198,9 @@ masscan_app_selftest(void) {
         return 1;
     if (masscan_string_to_app("gtpu") != PROTO_GTPU ||
         strcmp(masscan_app_to_string(PROTO_GTPU), "gtpu") != 0)
+        return 1;
+    if (masscan_string_to_app("rip") != PROTO_RIP ||
+        strcmp(masscan_app_to_string(PROTO_RIP), "rip") != 0)
         return 1;
     return 0;
 }

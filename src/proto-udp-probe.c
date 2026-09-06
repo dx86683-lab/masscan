@@ -472,6 +472,36 @@ gtpu_classify(const unsigned char *response, unsigned length, uint64_t cookie)
     return 1;
 }
 
+static int
+rip_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+             struct UdpPreparedProbe *result)
+{
+    (void)cookie;
+    (void)target;
+    memset(result->payload, 0, 24);
+    result->payload[0] = 1;
+    result->payload[1] = 1;
+    result->payload[5] = 2;
+    result->payload[8] = 192;
+    result->payload[10] = 2;
+    result->payload[11] = 1;
+    result->payload[23] = 16;
+    result->length = 24;
+    return 1;
+}
+
+static int
+rip_classify(const unsigned char *response, unsigned length, uint64_t cookie)
+{
+    unsigned i;
+    (void)cookie;
+    if (length != 24 || memcmp(response, "\x02\x01\x00\x00\x00\x02\x00\x00"
+                              "\xc0\x00\x02\x01", 12)) return 0;
+    for (i = 12; i < 23; i++)
+        if (response[i] != 0) return 0;
+    return response[23] >= 1 && response[23] <= 16;
+}
+
 static const struct UdpProbeSpec udp_probe_catalog[] = {
     {80, PROTO_QUIC, quic_prepare, quic_classify},
     {443, PROTO_QUIC, quic_prepare, quic_classify},
@@ -487,6 +517,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {5351, PROTO_NATPMP, natpmp_prepare, natpmp_classify},
     {111, PROTO_RPC, rpc_probe_prepare, rpc_probe_classify},
     {2152, PROTO_GTPU, gtpu_prepare, gtpu_classify},
+    {520, PROTO_RIP, rip_prepare, rip_classify},
     {0, PROTO_NONE, 0, 0}
 };
 
@@ -569,6 +600,34 @@ udp_probe_catalog_selftest(void)
     };
     unsigned i;
 
+    {
+        unsigned char reply[25] = {
+            2, 1, 0, 0, 0, 2, 0, 0, 192, 0, 2, 1,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16
+        };
+        if (udp_probe_classify(520, reply, 24, cookie) != PROTO_RIP)
+            return 1;
+        for (i = 0; i < 24; i++)
+            if (udp_probe_classify(520, reply, i, cookie) != PROTO_NONE) return 1;
+        if (udp_probe_classify(520, reply, 25, cookie) != PROTO_NONE) return 1;
+        reply[1] = 2;
+        if (udp_probe_classify(520, reply, 24, cookie) != PROTO_NONE) return 1;
+        reply[1] = 1;
+        reply[11] = 2;
+        if (udp_probe_classify(520, reply, 24, cookie) != PROTO_NONE) return 1;
+        reply[11] = 1;
+        reply[23] = 0;
+        if (udp_probe_classify(520, reply, 24, cookie) != PROTO_NONE) return 1;
+        reply[23] = 17;
+        if (udp_probe_classify(520, reply, 24, cookie) != PROTO_NONE) return 1;
+        reply[23] = 1;
+        if (udp_probe_classify(520, reply, 24, cookie) != PROTO_RIP) return 1;
+        reply[12] = 1;
+        if (udp_probe_classify(520, reply, 24, cookie) != PROTO_NONE) return 1;
+        if (!udp_probe_prepare(520, cookie, NULL, &result) || result.length != 24 ||
+            memcmp(result.payload, "\x01\x01\x00\x00\x00\x02\x00\x00\xc0\x00\x02\x01"
+                   "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10", 24)) return 1;
+    }
     {
         unsigned ports[] = {443, 2491};
         for (i = 0; i < sizeof(ports) / sizeof(ports[0]); i++) {
