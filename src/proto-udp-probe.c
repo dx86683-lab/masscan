@@ -531,6 +531,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {2427, PROTO_MGCP, mgcp_prepare, mgcp_classify},
     {6060, PROTO_SIP, sip_probe_prepare, sip_probe_classify},
     {5060, PROTO_SIP, sip_probe_prepare, sip_probe_classify},
+    {5061, PROTO_SIP, sip_probe_prepare, sip_probe_classify},
     {427, PROTO_SLP, slp_prepare, slp_classify},
     {177, PROTO_XDMCP, xdmcp_prepare, xdmcp_classify},
     {123, PROTO_NTP, ntp_probe_prepare, ntp_probe_classify},
@@ -948,6 +949,12 @@ udp_probe_catalog_selftest(void)
             return 1;
         if (udp_probe_classify(5060, (const unsigned char *)sip,
                               (unsigned)strlen(sip), 1) != PROTO_SIP)
+            return 1;
+        if (udp_probe_classify(5061, (const unsigned char *)sip,
+                              (unsigned)strlen(sip), 1) != PROTO_SIP ||
+            udp_probe_classify(5061, (const unsigned char *)sip,
+                              (unsigned)strlen(sip), 2) != PROTO_NONE ||
+            udp_probe_classify(5061, (const unsigned char *)sip, 10, 1) != PROTO_NONE)
             return 1;
         for (i = 0; i < strlen(sip); i++) {
             if (udp_probe_classify(6060, (const unsigned char *)sip, i, 1) != PROTO_NONE)
