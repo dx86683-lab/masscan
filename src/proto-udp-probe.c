@@ -232,6 +232,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {64738, PROTO_MUMBLE, mumble_prepare, mumble_classify},
     {2427, PROTO_MGCP, mgcp_prepare, mgcp_classify},
     {6060, PROTO_SIP, sip_probe_prepare, sip_probe_classify},
+    {5060, PROTO_SIP, sip_probe_prepare, sip_probe_classify},
     {0, PROTO_NONE, 0, 0}
 };
 
@@ -347,6 +348,9 @@ udp_probe_catalog_selftest(void)
             "Call-ID: scan-00000001@scan.invalid\r\n"
             "CSeq: 1 OPTIONS\r\nContent-Length: 0\r\n\r\n";
         if (udp_probe_classify(6060, (const unsigned char *)sip,
+                              (unsigned)strlen(sip), 1) != PROTO_SIP)
+            return 1;
+        if (udp_probe_classify(5060, (const unsigned char *)sip,
                               (unsigned)strlen(sip), 1) != PROTO_SIP)
             return 1;
         for (i = 0; i < strlen(sip); i++) {
