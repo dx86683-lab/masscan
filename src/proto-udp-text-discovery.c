@@ -5,6 +5,24 @@
 #include <stdio.h>
 
 int
+andromouse_probe_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+                        struct UdpPreparedProbe *result)
+{
+    (void)cookie;
+    (void)target;
+    memcpy(result->payload, "AMSNIFF", 7);
+    result->length = 7;
+    return 1;
+}
+
+int
+andromouse_probe_classify(const unsigned char *data, unsigned length, uint64_t cookie)
+{
+    (void)cookie;
+    return length == 7 && memcmp(data, "GOTBACK", 7) == 0;
+}
+
+int
 serialnumberd_probe_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
                            struct UdpPreparedProbe *result)
 {

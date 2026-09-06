@@ -131,7 +131,7 @@ handle_udp(struct Output *out, time_t timestamp,
             probe_protocol == PROTO_GARDASOFT || probe_protocol == PROTO_GARDASOFT_VERSION ||
             probe_protocol == PROTO_VENTRILO || probe_protocol == PROTO_SERIALNUMBERD ||
             probe_protocol == PROTO_HIKVISION || probe_protocol == PROTO_FINS ||
-            probe_protocol == PROTO_DAHUA) {
+            probe_protocol == PROTO_DAHUA || probe_protocol == PROTO_ANDROMOUSE) {
             banner_data = (const unsigned char *)"discovery-response";
             banner_length = 18;
         }
@@ -508,6 +508,7 @@ proto_udp_selftest(void)
                 "\x45\x01\xaf\x24\xde\x6a\xf5\xd9\x66\xf8\x80\x11\x3c\x4e\x97\xc0\xf0\x66\x81\xa1"
                 "\xd9\xc1\xb7\xd8\x1e\x69\x5b\x81\xa5\xa1\xbf\x12\xe0\x98\x7a\xcb\x39\xad\x7b\x98\xb0\x66\x23\x9b\x8e"},
             {626, sizeof(serial_reply), PROTO_SERIALNUMBERD, serial_reply},
+            {8888, 7, PROTO_ANDROMOUSE, "GOTBACK"},
 #ifdef UDP_EXTENDED_PROBES
             {37020, sizeof(sadp_reply) - 1, PROTO_HIKVISION, sadp_reply},
             {37810, 182, PROTO_DAHUA,

@@ -894,6 +894,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {3784, PROTO_VENTRILO, ventrilo_probe_prepare, ventrilo_probe_classify},
     {626, PROTO_SERIALNUMBERD, serialnumberd_probe_prepare, serialnumberd_probe_classify},
     {9600, PROTO_FINS, fins_probe_prepare, fins_probe_classify},
+    {8888, PROTO_ANDROMOUSE, andromouse_probe_prepare, andromouse_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {37020, PROTO_HIKVISION, hikvision_probe_prepare, hikvision_probe_classify},
     {37810, PROTO_DAHUA, dahua_probe_prepare, dahua_probe_classify},
@@ -1058,6 +1059,32 @@ udp_probe_catalog_selftest(void)
 {
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
+    {
+        static const unsigned char reply[] = "GOTBACK";
+        unsigned char changed[8];
+        unsigned n, bit;
+        if (!udp_probe_prepare(8888, cookie, NULL, &result) || result.length != 7 ||
+            memcmp(result.payload, "AMSNIFF", 7) ||
+            udp_probe_classify(8888, reply, 7, cookie) != PROTO_ANDROMOUSE) {
+            fprintf(stderr, "andromouse: discovery pair failed\n"); return 1;
+        }
+        for (n = 0; n < 7; n++) {
+            if (udp_probe_classify(8888, reply, n, cookie) != PROTO_NONE) return 1;
+            for (bit = 0; bit < 8; bit++) {
+                memcpy(changed, reply, 8); changed[n] ^= 1u << bit;
+                if (udp_probe_classify(8888, changed, 7, cookie) != PROTO_NONE) return 1;
+            }
+        }
+        memcpy(changed, reply, 8);
+        if (udp_probe_classify(8888, changed, 8, cookie) != PROTO_NONE) return 1;
+        changed[7] = 'X';
+        if (udp_probe_classify(8888, changed, 8, cookie) != PROTO_NONE) return 1;
+        changed[7] = '\n';
+        if (udp_probe_classify(8888, changed, 8, cookie) != PROTO_NONE ||
+            udp_probe_classify(8888, result.payload, result.length, cookie) != PROTO_NONE ||
+            udp_probe_classify(8888, (const unsigned char *)"AMServer", 8, cookie) != PROTO_NONE ||
+            udp_probe_classify(8888, reply, 7, cookie ^ 1) != PROTO_ANDROMOUSE) return 1;
+    }
 #ifdef UDP_EXTENDED_PROBES
     {
         static const unsigned char reply[] =
