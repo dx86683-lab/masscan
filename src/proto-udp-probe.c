@@ -12,6 +12,7 @@
 #include "proto-udp-l2tp.h"
 #include "proto-udp-ikev1.h"
 #include "proto-udp-ikev2.h"
+#include "proto-udp-stun.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -27,6 +28,8 @@ struct UdpProbeSpec {
     enum ApplicationProtocol protocol;
     UDP_PROBE_PREPARE prepare;
     UDP_PROBE_CLASSIFY classify;
+    int (*classify_target)(const unsigned char *, unsigned, uint64_t,
+                           const struct UdpProbeTarget *);
 };
 
 static void
@@ -862,6 +865,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {3391, PROTO_DTLS, dtls_probe_prepare, dtls_probe_classify},
     {4500, PROTO_IKEV1, ikev1_probe_prepare, ikev1_probe_classify},
     {500, PROTO_IKEV2, ikev2_probe_prepare, ikev2_probe_classify},
+    {3478, PROTO_STUN, stun_probe_prepare, NULL, stun_probe_classify},
 #endif
     {0, PROTO_NONE, 0, 0}
 };
@@ -902,6 +906,14 @@ udp_probe_classify(unsigned port,
                    unsigned response_length,
                    uint64_t cookie)
 {
+    return udp_probe_classify_target(port, response, response_length, cookie, NULL);
+}
+
+enum ApplicationProtocol
+udp_probe_classify_target(unsigned port, const unsigned char *response,
+                           unsigned response_length, uint64_t cookie,
+                           const struct UdpProbeTarget *target)
+{
     unsigned i;
 
     if (response == NULL && response_length != 0)
@@ -910,7 +922,9 @@ udp_probe_classify(unsigned port,
     for (i = 0; udp_probe_catalog[i].port != 0; i++) {
         if (udp_probe_catalog[i].port != port)
             continue;
-        if (udp_probe_catalog[i].classify(response, response_length, cookie))
+        if (udp_probe_catalog[i].classify_target ?
+            udp_probe_catalog[i].classify_target(response, response_length, cookie, target) :
+            udp_probe_catalog[i].classify(response, response_length, cookie))
             return udp_probe_catalog[i].protocol;
         return PROTO_NONE;
     }
@@ -996,6 +1010,73 @@ udp_probe_catalog_selftest(void)
         }
     }
 #ifdef UDP_EXTENDED_PROBES
+    {
+        struct UdpProbeTarget target;
+        unsigned char reply[64] = {0};
+        memset(&target, 0, sizeof(target));
+        target.source.version = target.destination.version = 4;
+        target.source.ipv4 = 0xc0000201;
+        target.destination.ipv4 = 0xc6336401;
+        target.source_port = 40000;
+        if (!udp_probe_runtime_init() || !udp_probe_prepare(3478, cookie, &target, &result)) return 1;
+        memcpy(reply, result.payload, 20);
+        reply[0] = 1; reply[3] = 12;
+        memcpy(reply + 20, "\x00\x20\x00\x08\x00\x01\xa1\x47\xe1\x12\xa6\x43", 12);
+        if (udp_probe_classify_target(3478, reply, 32, cookie, &target) != PROTO_STUN) return 1;
+        {
+            struct UdpProbeTarget other = target;
+            unsigned char changed[96], transaction[12];
+            if (result.length != 20 || memcmp(result.payload, "\x00\x01\x00\x00\x21\x12\xa4\x42", 8)) return 1;
+            memcpy(transaction, result.payload + 8, 12);
+            if (udp_probe_classify(3478, reply, 32, cookie) != PROTO_NONE ||
+                udp_probe_classify_target(3478, reply, 32, cookie ^ 1, &target) != PROTO_NONE ||
+                udp_probe_classify_target(3478, result.payload, 20, cookie, &target) != PROTO_NONE) return 1;
+            for (i = 0; i < 32; i++)
+                if (udp_probe_classify_target(3478, reply, i, cookie, &target) != PROTO_NONE) return 1;
+            for (i = 8; i < 20; i++) {
+                memcpy(changed, reply, 32); changed[i] ^= 1;
+                if (udp_probe_classify_target(3478, changed, 32, cookie, &target) != PROTO_NONE) return 1;
+            }
+            other.destination.ipv4++;
+            if (udp_probe_classify_target(3478, reply, 32, cookie, &other) != PROTO_NONE ||
+                !udp_probe_prepare(3478, cookie, &other, &result) || !memcmp(transaction, result.payload + 8, 12)) return 1;
+            other = target; other.source.ipv4++;
+            if (udp_probe_classify_target(3478, reply, 32, cookie, &other) != PROTO_NONE) return 1;
+            other = target; other.source_port++;
+            if (udp_probe_classify_target(3478, reply, 32, cookie, &other) != PROTO_NONE) return 1;
+            other.source.version = other.destination.version = 6;
+            other.source.ipv6.hi = other.destination.ipv6.hi = UINT64_C(0x20010db800000000);
+            other.source.ipv6.lo = 1; other.destination.ipv6.lo = 2;
+            if (!udp_probe_prepare(3478, cookie, &other, &result) || !memcmp(transaction, result.payload + 8, 12)) return 1;
+            memcpy(changed, reply, 32); memcpy(changed + 8, result.payload + 8, 12);
+            if (udp_probe_classify_target(3478, changed, 32, cookie, &other) != PROTO_STUN) return 1;
+            if (udp_probe_prepare(3478, cookie, NULL, &result)) return 1;
+            other.source.version = 0;
+            if (udp_probe_prepare(3478, cookie, &other, &result)) return 1;
+            memcpy(changed, reply, 32); changed[24] = 255;
+            if (udp_probe_classify_target(3478, changed, 32, cookie, &target) != PROTO_STUN) return 1;
+            changed[25] = 3;
+            if (udp_probe_classify_target(3478, changed, 32, cookie, &target) != PROTO_NONE) return 1;
+            memcpy(changed, reply, 32); changed[3] = 36;
+            memcpy(changed + 32, "\x00\x08\x00\x14", 4); memset(changed + 36, 0, 20);
+            if (udp_probe_classify_target(3478, changed, 56, cookie, &target) != PROTO_NONE) return 1;
+            memcpy(changed, reply, 32); changed[3] = 20;
+            memcpy(changed + 32, "\xff\xff\x00\x01\x58\xaa\xbb\xcc", 8);
+            if (udp_probe_classify_target(3478, changed, 40, cookie, &target) != PROTO_STUN) return 1;
+            changed[32] = 0x7f;
+            if (udp_probe_classify_target(3478, changed, 40, cookie, &target) != PROTO_NONE) return 1;
+            memcpy(changed, reply, 32); changed[3] = 24;
+            memcpy(changed + 32, reply + 20, 12); changed[37] = 3;
+            if (udp_probe_classify_target(3478, changed, 44, cookie, &target) != PROTO_STUN) return 1;
+            changed[25] = 3; changed[37] = 1;
+            if (udp_probe_classify_target(3478, changed, 44, cookie, &target) != PROTO_NONE) return 1;
+            memcpy(changed, reply, 32); changed[3] = 24; changed[23] = 20; changed[25] = 2;
+            memset(changed + 32, 0, 12);
+            if (udp_probe_classify_target(3478, changed, 44, cookie, &target) != PROTO_STUN) return 1;
+            changed[23] = 19;
+            if (udp_probe_classify_target(3478, changed, 44, cookie, &target) != PROTO_NONE) return 1;
+        }
+    }
     {
         unsigned char reply[256] = {0};
         static const unsigned char sa[] =

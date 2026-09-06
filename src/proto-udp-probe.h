@@ -30,6 +30,12 @@ udp_probe_classify(unsigned port,
                    unsigned response_length,
                    uint64_t cookie);
 
+/* Target uses the original request direction, including on reception. */
+enum ApplicationProtocol
+udp_probe_classify_target(unsigned port, const unsigned char *response,
+                           unsigned response_length, uint64_t cookie,
+                           const struct UdpProbeTarget *target);
+
 int
 udp_probe_catalog_selftest(void);
 

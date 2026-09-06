@@ -86,9 +86,13 @@ handle_udp(struct Output *out, time_t timestamp,
         uint64_t cookie = (uint32_t)syn_cookie(ip_them, port_them | Templ_UDP,
                                      parsed->dst_ip, parsed->port_dst,
                                      entropy);
-        probe_protocol = udp_probe_classify(port_them,
+        struct UdpProbeTarget target;
+        target.source = parsed->dst_ip;
+        target.destination = parsed->src_ip;
+        target.source_port = parsed->port_dst;
+        probe_protocol = udp_probe_classify_target(port_them,
                                             px + parsed->app_offset,
-                                            parsed->app_length, cookie);
+                                            parsed->app_length, cookie, &target);
     }
 
     if (probe_protocol != PROTO_NONE) {
@@ -389,6 +393,37 @@ proto_udp_selftest(void)
         udp_selftest_capture.protocol != PROTO_OPENVPN) {
         fprintf(stderr, "udp: prepared cookie failed receive correlation\n");
         return 1;
+    }
+    {
+        unsigned family;
+        unsigned char binding[32];
+        struct UdpProbeTarget target;
+        for (family = 4; family <= 6; family += 2) {
+            parsed.src_ip.version = parsed.dst_ip.version = family;
+            if (family == 6) {
+                parsed.src_ip.ipv6.hi = parsed.dst_ip.ipv6.hi = UINT64_C(0x20010db800000000);
+                parsed.src_ip.ipv6.lo = 1; parsed.dst_ip.ipv6.lo = 2;
+            }
+            parsed.port_src = 3478;
+            parsed.app_length = sizeof(binding);
+            target.source = parsed.dst_ip;
+            target.destination = parsed.src_ip;
+            target.source_port = parsed.port_dst;
+            cookie = syn_cookie(parsed.src_ip, parsed.port_src | Templ_UDP,
+                                parsed.dst_ip, parsed.port_dst, 7);
+            if (!udp_probe_prepare(3478, (uint32_t)cookie, &target, &request)) return 1;
+            memcpy(binding, request.payload, 20);
+            binding[0] = 1; binding[3] = 12;
+            memcpy(binding + 20, "\x00\x20\x00\x08\x00\x01\xa1\x47\xe1\x12\xa6\x43", 12);
+            memset(&udp_selftest_capture, 0, sizeof(udp_selftest_capture));
+            fp = tmpfile();
+            if (fp == NULL) return 1;
+            out.fp = fp;
+            handle_udp(&out, 0, binding, sizeof(binding), &parsed, 7);
+            fclose(fp);
+            if (udp_selftest_capture.banner_count != 1 ||
+                udp_selftest_capture.protocol != PROTO_STUN) return 1;
+        }
     }
 #endif
 

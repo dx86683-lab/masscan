@@ -74,6 +74,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_L2TP:             return "l2tp";
     case PROTO_IKEV1:            return "ikev1";
     case PROTO_IKEV2:            return "ikev2";
+    case PROTO_STUN:             return "stun";
         
     case PROTO_ERROR:           return "error";
             
@@ -154,6 +155,7 @@ masscan_string_to_app(const char *str)
         {"l2tp",        PROTO_L2TP},
         {"ikev1",       PROTO_IKEV1},
         {"ikev2",       PROTO_IKEV2},
+        {"stun",        PROTO_STUN},
         {0,0}
     };
     size_t i;
@@ -202,6 +204,7 @@ masscan_app_selftest(void) {
         {PROTO_L2TP, 61},
         {PROTO_IKEV1, 62},
         {PROTO_IKEV2, 63},
+        {PROTO_STUN, 64},
         {0,0}
     };
     size_t i;
