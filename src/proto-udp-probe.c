@@ -330,6 +330,42 @@ xdmcp_classify(const unsigned char *response, unsigned length, uint64_t cookie)
     return offset == length;
 }
 
+static int
+ntp_probe_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+                  struct UdpPreparedProbe *result)
+{
+    (void)target;
+    memset(result->payload, 0, 48);
+    result->payload[0] = 0x23;
+    result->payload[2] = 6;
+    write_u32_be(result->payload + 40, (uint32_t)cookie);
+    write_u32_be(result->payload + 44, ~(uint32_t)cookie);
+    result->length = 48;
+    return 1;
+}
+
+static int
+ntp_probe_classify(const unsigned char *response, unsigned length, uint64_t cookie)
+{
+    unsigned version, i;
+    unsigned char expected[8];
+    static const unsigned char zero[8] = {0};
+    if (length != 48) return 0;
+    version = (response[0] >> 3) & 7;
+    if ((version != 3 && version != 4) || (response[0] & 7) != 4 || response[1] > 16)
+        return 0;
+    write_u32_be(expected, (uint32_t)cookie);
+    write_u32_be(expected + 4, ~(uint32_t)cookie);
+    if (memcmp(response + 24, expected, 8)) return 0;
+    if (response[1] == 0) {
+        for (i = 12; i < 16; i++)
+            if (response[i] < 'A' || response[i] > 'Z') return 0;
+        return 1;
+    }
+    return memcmp(response + 32, zero, 8) != 0 &&
+           memcmp(response + 40, zero, 8) != 0;
+}
+
 static const struct UdpProbeSpec udp_probe_catalog[] = {
     {80, PROTO_QUIC, quic_prepare, quic_classify},
     {6969, PROTO_BITTORRENT, bittorrent_prepare, bittorrent_classify},
@@ -339,8 +375,18 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {5060, PROTO_SIP, sip_probe_prepare, sip_probe_classify},
     {427, PROTO_SLP, slp_prepare, slp_classify},
     {177, PROTO_XDMCP, xdmcp_prepare, xdmcp_classify},
+    {123, PROTO_NTP, ntp_probe_prepare, ntp_probe_classify},
     {0, PROTO_NONE, 0, 0}
 };
+
+int
+udp_probe_is_registered(unsigned port)
+{
+    unsigned i;
+    for (i = 0; udp_probe_catalog[i].port; i++)
+        if (udp_probe_catalog[i].port == port) return 1;
+    return 0;
+}
 
 int
 udp_probe_prepare(unsigned port, uint64_t cookie,
@@ -412,6 +458,37 @@ udp_probe_catalog_selftest(void)
     };
     unsigned i;
 
+    {
+        unsigned char reply[49] = {0x24, 2};
+        memcpy(reply + 24, "\x89\xab\xcd\xef\x76\x54\x32\x10", 8);
+        reply[32] = 1;
+        reply[40] = 1;
+        if (udp_probe_classify(123, reply, 48, cookie) != PROTO_NTP)
+            return 1;
+        for (i = 0; i < 48; i++)
+            if (udp_probe_classify(123, reply, i, cookie) != PROTO_NONE) return 1;
+        if (udp_probe_classify(123, reply, 49, cookie) != PROTO_NONE ||
+            udp_probe_classify(123, reply, 48, cookie ^ 1) != PROTO_NONE) return 1;
+        reply[0] = 0x23;
+        if (udp_probe_classify(123, reply, 48, cookie) != PROTO_NONE) return 1;
+        reply[0] = 0x14;
+        if (udp_probe_classify(123, reply, 48, cookie) != PROTO_NONE) return 1;
+        reply[0] = 0x1c;
+        if (udp_probe_classify(123, reply, 48, cookie) != PROTO_NTP) return 1;
+        reply[1] = 17;
+        if (udp_probe_classify(123, reply, 48, cookie) != PROTO_NONE) return 1;
+        reply[1] = 16;
+        reply[40] = 0;
+        if (udp_probe_classify(123, reply, 48, cookie) != PROTO_NONE) return 1;
+        reply[1] = 0;
+        memcpy(reply + 12, "RATE", 4);
+        if (udp_probe_classify(123, reply, 48, cookie) != PROTO_NTP) return 1;
+        reply[15] = 0;
+        if (udp_probe_classify(123, reply, 48, cookie) != PROTO_NONE) return 1;
+        if (!udp_probe_prepare(123, cookie, NULL, &result) || result.length != 48 ||
+            result.payload[0] != 0x23 || result.payload[2] != 6 ||
+            memcmp(result.payload + 40, "\x89\xab\xcd\xef\x76\x54\x32\x10", 8)) return 1;
+    }
     {
         unsigned char reply[] = {0, 1, 0, 5, 0, 9, 0, 0, 0, 1, 'x', 0, 2, 'o', 'k'};
         if (udp_probe_classify(177, reply, sizeof(reply), cookie) != PROTO_XDMCP)

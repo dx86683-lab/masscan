@@ -33,4 +33,7 @@ udp_probe_classify(unsigned port,
 int
 udp_probe_catalog_selftest(void);
 
+int
+udp_probe_is_registered(unsigned port);
+
 #endif

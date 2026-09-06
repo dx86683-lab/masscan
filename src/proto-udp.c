@@ -95,6 +95,10 @@ handle_udp(struct Output *out, time_t timestamp,
                              probe_protocol, parsed->ip_ttl,
                              px + parsed->app_offset, parsed->app_length);
         status = 1;
+    } else if (out->masscan != NULL && out->masscan->is_udp_probe_experimental &&
+               udp_probe_is_registered(port_them)) {
+        /* A rejected experimental reply must not gain a fallback protocol label. */
+        status = 0;
     } else switch (port_them) {
         case 53: /* DNS - Domain Name System (amplifier) */
             status = handle_dns(out, timestamp, px, length, parsed, entropy);
@@ -350,6 +354,19 @@ proto_udp_selftest(void)
     fclose(fp);
     if (udp_selftest_capture.protocol == PROTO_MUMBLE)
         return 1;
+
+    parsed.port_src = 123;
+    parsed.app_length = 4;
+    memset(response, 0, sizeof(response));
+    response[0] = 0x97;
+    memset(&udp_selftest_capture, 0, sizeof(udp_selftest_capture));
+    fp = tmpfile();
+    if (fp == NULL) return 1;
+    out.fp = fp;
+    handle_udp(&out, 0, response, 4, &parsed, 7);
+    fclose(fp);
+    if (udp_selftest_capture.banner_count != 1 ||
+        udp_selftest_capture.protocol != PROTO_NONE) return 1;
 
     return 0;
 }
