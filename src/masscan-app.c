@@ -69,6 +69,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_SSDP:             return "ssdp";
     case PROTO_OPENVPN:          return "openvpn";
     case PROTO_DHT:              return "dht";
+    case PROTO_JENKINS:          return "jenkins";
         
     case PROTO_ERROR:           return "error";
             
@@ -144,6 +145,7 @@ masscan_string_to_app(const char *str)
         {"ssdp",        PROTO_SSDP},
         {"openvpn",     PROTO_OPENVPN},
         {"dht",         PROTO_DHT},
+        {"jenkins",     PROTO_JENKINS},
         {0,0}
     };
     size_t i;
@@ -187,6 +189,7 @@ masscan_app_selftest(void) {
         {PROTO_SSDP, 56},
         {PROTO_OPENVPN, 57},
         {PROTO_DHT, 58},
+        {PROTO_JENKINS, 59},
         {0,0}
     };
     size_t i;
@@ -267,6 +270,9 @@ masscan_app_selftest(void) {
         return 1;
     if (masscan_string_to_app("dht") != PROTO_DHT ||
         strcmp(masscan_app_to_string(PROTO_DHT), "dht") != 0)
+        return 1;
+    if (masscan_string_to_app("jenkins") != PROTO_JENKINS ||
+        strcmp(masscan_app_to_string(PROTO_JENKINS), "jenkins") != 0)
         return 1;
     return 0;
 }

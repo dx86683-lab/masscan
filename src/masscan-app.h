@@ -67,6 +67,7 @@ enum ApplicationProtocol {
     PROTO_SSDP,
     PROTO_OPENVPN,
     PROTO_DHT,
+    PROTO_JENKINS,
 
     PROTO_end_of_list /* must be last one */
 };

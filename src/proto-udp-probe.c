@@ -7,6 +7,7 @@
 #include "proto-udp-openvpn.h"
 #include "proto-udp-runtime.h"
 #include "proto-udp-dht.h"
+#include "proto-udp-jenkins.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -852,6 +853,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
 #ifdef UDP_EXTENDED_PROBES
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
     {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
+    {33848, PROTO_JENKINS, jenkins_probe_prepare, jenkins_probe_classify},
 #endif
     {0, PROTO_NONE, 0, 0}
 };
@@ -936,6 +938,54 @@ udp_probe_catalog_selftest(void)
     unsigned i;
 
 #ifdef UDP_EXTENDED_PROBES
+    {
+        static const unsigned char reply[] = "<hudson><version>2.218</version></hudson>";
+        if (udp_probe_classify(33848, reply, sizeof(reply) - 1, cookie) != PROTO_JENKINS) return 1;
+        {
+            static const struct {const char *text; int valid;} cases[] = {
+                {"<?xml version='1.0' encoding='UTF-8'?><hudson><version>2.218-SNAPSHOT</version></hudson>", 1},
+                {"<hudson><version>2<![CDATA[.218]]></version><url>http://example.test/?a=1&amp;b=2</url><slave-port>65535</slave-port><server-id>x</server-id><p:plugin xmlns:p='urn:plugin'><version>other</version></p:plugin></hudson><!--done-->", 1},
+                {"<hudson><version>&#50;.218</version></hudson>", 1},
+                {"<hudson><version>2</version><version>3</version></hudson>", 0},
+                {"<hudson><version>2</version><slave-port>0</slave-port></hudson>", 0},
+                {"<hudson><version>2</version><slave-port>65536</slave-port></hudson>", 0},
+                {"<hudson><version>2</version><slave-port>-1</slave-port></hudson>", 0},
+                {"<hudson><version>2</version><slave-port>1</slave-port><slave-port>2</slave-port></hudson>", 0},
+                {"<hudson><version>2<x/>.218</version></hudson>", 0},
+                {"<hudson><plugin><version>2</version></plugin></hudson>", 0},
+                {"<hudson xmlns='urn:other'><version>2</version></hudson>", 0},
+                {"<other><version>2</version></other>", 0},
+                {"<hudson><version> </version></hudson>", 0},
+                {"<hudson><version>2</version></hudson><hudson/>", 0},
+                {"<hudson><version>2</version></hudson>garbage", 0},
+                {"<hudson>garbage<version>2</version></hudson>", 0},
+                {"<hudson><version>\xc0\xaf</version></hudson>", 0},
+                {"<!DOCTYPE hudson><hudson><version>2</version></hudson>", 0},
+                {"<!DOCTYPE hudson [<!ENTITY v '2'>]><hudson><version>&v;</version></hudson>", 0},
+                {"<!DOCTYPE hudson SYSTEM 'file:///nonexistent'><hudson><version>2</version></hudson>", 0},
+                {"<?xml version='1.0' encoding='ISO-8859-1'?><hudson><version>2</version></hudson>", 0}
+            };
+            unsigned char nested[300];
+            unsigned offset = 0;
+            if (!udp_probe_prepare(33848, cookie, NULL, &result) || result.length != 1 || result.payload[0]) return 1;
+            for (i = 0; i < sizeof(reply) - 1; i++)
+                if (udp_probe_classify(33848, reply, i, cookie) != PROTO_NONE) return 1;
+            if (udp_probe_classify(33848, reply, sizeof(reply), cookie) != PROTO_NONE) return 1;
+            for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+                if ((udp_probe_classify(33848, (const unsigned char *)cases[i].text,
+                     (unsigned)strlen(cases[i].text), cookie) == PROTO_JENKINS) != cases[i].valid) {
+                    fprintf(stderr, "Jenkins XML case %u failed\n", i);
+                    return 1;
+                }
+            memcpy(nested, "<hudson><version>2</version>", 28);
+            offset = 28;
+            for (i = 0; i < 17; i++) { memcpy(nested + offset, "<x>", 3); offset += 3; }
+            for (i = 0; i < 17; i++) { memcpy(nested + offset, "</x>", 4); offset += 4; }
+            memcpy(nested + offset, "</hudson>", 9);
+            offset += 9;
+            if (udp_probe_classify(33848, nested, offset, cookie) != PROTO_NONE) return 1;
+        }
+    }
     {
         static const unsigned char reply[] = "d1:rd2:id20:abcdefghij0123456789e1:t4:\x89\xab\xcd\xef" "1:y1:re";
         if (udp_probe_classify(6881, reply, sizeof(reply) - 1, cookie) != PROTO_DHT) return 1;
