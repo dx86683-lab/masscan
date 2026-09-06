@@ -69,6 +69,7 @@ enum ApplicationProtocol {
     PROTO_DHT,
     PROTO_JENKINS,
     PROTO_DTLS,
+    PROTO_L2TP,
 
     PROTO_end_of_list /* must be last one */
 };

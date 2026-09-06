@@ -9,6 +9,7 @@
 #include "proto-udp-dht.h"
 #include "proto-udp-jenkins.h"
 #include "proto-udp-dtls.h"
+#include "proto-udp-l2tp.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -851,6 +852,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {1434, PROTO_SQL_BROWSER, sqlr_probe_prepare, sqlr_probe_classify},
     {47808, PROTO_BACNET, bacnet_prepare, bacnet_classify},
     {1900, PROTO_SSDP, ssdp_probe_prepare, ssdp_probe_classify},
+    {1701, PROTO_L2TP, l2tp_probe_prepare, l2tp_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {1194, PROTO_OPENVPN, openvpn_probe_prepare, openvpn_probe_classify},
     {6881, PROTO_DHT, dht_probe_prepare, dht_probe_classify},
@@ -939,6 +941,56 @@ udp_probe_catalog_selftest(void)
     };
     unsigned i;
 
+    {
+        static const unsigned char reply[] =
+            "\xc8\x02\x00\x3b\xcd\xef\x00\x00\x00\x00\x00\x01"
+            "\x80\x08\x00\x00\x00\x00\x00\x02"
+            "\x80\x08\x00\x00\x00\x02\x01\x00"
+            "\x80\x0d\x00\x00\x00\x07scanner"
+            "\x80\x0a\x00\x00\x00\x03\x00\x00\x00\x00"
+            "\x80\x08\x00\x00\x00\x09\x12\x34";
+        if (udp_probe_classify(1701, reply, sizeof(reply) - 1, cookie) != PROTO_L2TP) return 1;
+        {
+            unsigned char changed[128];
+            static const unsigned offsets[] = {0, 2, 3, 4, 5, 6, 8, 10, 11, 12, 13, 14, 17, 19, 23, 26, 27, 33, 52};
+            if (!udp_probe_prepare(1701, cookie, NULL, &result) || result.length != 59 ||
+                result.payload[4] || result.payload[5] || result.payload[11] || result.payload[19] != 1 ||
+                result.payload[57] != 0xcd || result.payload[58] != 0xef) return 1;
+            if (udp_probe_classify(1701, result.payload, result.length, cookie) != PROTO_NONE) return 1;
+            for (i = 0; i < sizeof(reply) - 1; i++)
+                if (udp_probe_classify(1701, reply, i, cookie) != PROTO_NONE) return 1;
+            if (udp_probe_classify(1701, reply, sizeof(reply) - 1, cookie ^ 1) != PROTO_NONE) return 1;
+            for (i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++) {
+                memcpy(changed, reply, sizeof(reply));
+                changed[offsets[i]] ^= 0x80;
+                if (udp_probe_classify(1701, changed, sizeof(reply) - 1, cookie) != PROTO_NONE) return 1;
+            }
+            memcpy(changed, reply, sizeof(reply));
+            changed[0] |= 0x04; /* Reserved control-header bit is ignored. */
+            if (udp_probe_classify(1701, changed, 59, cookie) != PROTO_L2TP) return 1;
+            changed[57] = changed[58] = 0;
+            if (udp_probe_classify(1701, changed, 59, cookie) != PROTO_NONE) return 1;
+            memcpy(changed, reply, sizeof(reply));
+            changed[3] = 65;
+            memcpy(changed + 59, "\x00\x06\x12\x34\x00\x01", 6);
+            if (udp_probe_classify(1701, changed, 65, cookie) != PROTO_L2TP) return 1;
+            changed[59] = 0x80;
+            if (udp_probe_classify(1701, changed, 65, cookie) != PROTO_NONE) return 1;
+            changed[3] = 67;
+            memcpy(changed + 59, "\x80\x08\x00\x00\x00\x0a\x00\x04", 8);
+            if (udp_probe_classify(1701, changed, 67, cookie) != PROTO_L2TP) return 1;
+            changed[66] = 0;
+            if (udp_probe_classify(1701, changed, 67, cookie) != PROTO_NONE) return 1;
+            memcpy(changed + 59, reply + 20, 8);
+            if (udp_probe_classify(1701, changed, 67, cookie) != PROTO_NONE) return 1;
+            memcpy(changed, reply, sizeof(reply));
+            changed[28] |= 0x40;
+            if (udp_probe_classify(1701, changed, 59, cookie) != PROTO_NONE) return 1;
+            changed[28] = 0;
+            if (udp_probe_classify(1701, changed, 59, cookie) != PROTO_NONE) return 1;
+            if (!udp_probe_prepare(1701, 0, NULL, &result) || result.payload[57] || result.payload[58] != 1) return 1;
+        }
+    }
 #ifdef UDP_EXTENDED_PROBES
     {
         static const unsigned char reply[] =

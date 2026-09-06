@@ -71,6 +71,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_DHT:              return "dht";
     case PROTO_JENKINS:          return "jenkins";
     case PROTO_DTLS:             return "dtls";
+    case PROTO_L2TP:             return "l2tp";
         
     case PROTO_ERROR:           return "error";
             
@@ -148,6 +149,7 @@ masscan_string_to_app(const char *str)
         {"dht",         PROTO_DHT},
         {"jenkins",     PROTO_JENKINS},
         {"dtls",        PROTO_DTLS},
+        {"l2tp",        PROTO_L2TP},
         {0,0}
     };
     size_t i;
@@ -193,6 +195,7 @@ masscan_app_selftest(void) {
         {PROTO_DHT, 58},
         {PROTO_JENKINS, 59},
         {PROTO_DTLS, 60},
+        {PROTO_L2TP, 61},
         {0,0}
     };
     size_t i;
