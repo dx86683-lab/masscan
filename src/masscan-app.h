@@ -62,6 +62,7 @@ enum ApplicationProtocol {
     PROTO_IPMSG,
     PROTO_ENIP,
     PROTO_MDNS,
+    PROTO_SQL_BROWSER,
 
     PROTO_end_of_list /* must be last one */
 };

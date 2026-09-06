@@ -2,6 +2,7 @@
 #include "proto-udp-sip.h"
 #include "proto-udp-snmpv3.h"
 #include "proto-udp-mdns.h"
+#include "proto-udp-sqlr.h"
 #include <string.h>
 #include "util-safefunc.h"
 
@@ -783,6 +784,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {705, PROTO_SNMP, snmpv3_probe_prepare, snmpv3_probe_classify},
     {1993, PROTO_SNMP, snmpv3_probe_prepare, snmpv3_probe_classify},
     {5353, PROTO_MDNS, mdns_probe_prepare, mdns_probe_classify},
+    {1434, PROTO_SQL_BROWSER, sqlr_probe_prepare, sqlr_probe_classify},
     {0, PROTO_NONE, 0, 0}
 };
 
@@ -865,6 +867,73 @@ udp_probe_catalog_selftest(void)
     };
     unsigned i;
 
+    {
+        static const unsigned char reply[] = "\x05\x4d\x00"
+            "ServerName;db;InstanceName;MSSQLSERVER;IsClustered;No;Version;16.0;tcp;1433;;";
+        if (udp_probe_classify(1434, reply, sizeof(reply) - 1, cookie) != PROTO_SQL_BROWSER) return 1;
+        {
+            static const struct {const char *text; int valid;} cases[] = {
+                {"ServerName;;InstanceName;;IsClustered;No;Version;.;", 0},
+                {"ServerName;;InstanceName;;IsClustered;No;Version;.;;", 1},
+                {"servername;db;instancename;a;isclustered;yes;version;1;TCP;65535;np;pipe;;", 1},
+                {"ServerName;db;InstanceName;a;IsClustered;No;Version;1;bv;a;b;c;d;e;via;host,1:2,3:4;rpc;host;spx;s;adsp;a;np;p;tcp;1;;", 1},
+                {"ServerName;db;InstanceName;a;IsClustered;No;Version;1;bv;a;b;c;d;;", 0},
+                {"ServerName;db;InstanceName;a;IsClustered;No;Version;1;tcp;0;;", 0},
+                {"ServerName;db;InstanceName;a;IsClustered;No;Version;1;tcp;65536;;", 0},
+                {"ServerName;db;InstanceName;a;IsClustered;No;Version;1;tcp;-1;;", 0},
+                {"ServerName;db;InstanceName;a;IsClustered;No;Version;1;tcp;2;TCP;2;;", 0},
+                {"ServerName;db;InstanceName;a;IsClustered;No;Version;1;via;abcdefghijklmnop,1:2;;", 0},
+                {"ServerName;db;InstanceName;a;IsClustered;No;Version;1;via;host,1;;", 0},
+                {"ServerName;db;InstanceName;a;IsClustered;No;Version;1;via;host,1:2,;;", 0},
+                {"ServerName;db;InstanceName;a;IsClustered;No;Version;1;via;host,1:x;;", 0},
+                {"ServerName;db;InstanceName;a;IsClustered;No;Version;x;;", 0},
+                {"ServerName;db;InstanceName;a;IsClustered;No;Version;;;", 0},
+                {"ServerName;db;InstanceName;a;IsClustered;Maybe;Version;1;;", 0},
+                {"ServerName;db;InstanceName;a;IsClustered;No;Version;12345678901234567;;", 0},
+                {"ServerName;db;InstanceName;a;IsClustered;No;Version;1;unknown;a;;", 0},
+                {"InstanceName;db;ServerName;a;IsClustered;No;Version;1;;", 0}
+            };
+            unsigned char altered[1100];
+            unsigned n;
+            for (i = 0; i < sizeof(reply) - 1; i++)
+                if (udp_probe_classify(1434, reply, i, cookie) != PROTO_NONE) return 1;
+            if (udp_probe_classify(1434, reply, sizeof(reply), cookie) != PROTO_NONE) return 1;
+            if (!udp_probe_prepare(1434, cookie, NULL, &result) || result.length != 1 ||
+                result.payload[0] != 3) return 1;
+            memcpy(altered, reply, 80);
+            altered[1] = 0;
+            altered[2] = 77;
+            if (udp_probe_classify(1434, altered, 80, cookie) != PROTO_NONE) return 1;
+            memcpy(altered, reply, 80);
+            memcpy(altered + 80, reply + 3, 77);
+            altered[1] = 154;
+            if (udp_probe_classify(1434, altered, 157, cookie) != PROTO_SQL_BROWSER) return 1;
+            for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+                n = (unsigned)strlen(cases[i].text);
+                altered[0] = 5;
+                altered[1] = (unsigned char)n;
+                altered[2] = (unsigned char)(n >> 8);
+                memcpy(altered + 3, cases[i].text, n);
+                if ((udp_probe_classify(1434, altered, n + 3, cookie) == PROTO_SQL_BROWSER) != cases[i].valid)
+                    return 1;
+            }
+            memcpy(altered, reply, 80);
+            altered[14] = 0;
+            if (udp_probe_classify(1434, altered, 80, cookie) != PROTO_NONE) return 1;
+            altered[14] = 0x81;
+            if (udp_probe_classify(1434, altered, 80, cookie) != PROTO_SQL_BROWSER) return 1;
+            memcpy(altered + 3, "ServerName;", 11);
+            memset(altered + 14, 'x', 256);
+            memcpy(altered + 270, ";InstanceName;a;IsClustered;No;Version;1;;", 42);
+            altered[0] = 5;
+            altered[1] = 53;
+            altered[2] = 1;
+            if (udp_probe_classify(1434, altered, 312, cookie) != PROTO_NONE) return 1;
+            memmove(altered + 269, altered + 270, 42);
+            altered[1] = 52;
+            if (udp_probe_classify(1434, altered, 311, cookie) != PROTO_SQL_BROWSER) return 1;
+        }
+    }
     {
         static const unsigned char reply[] =
             "\xcd\xef\x84\x00\x00\x01\x00\x01\x00\x00\x00\x00"

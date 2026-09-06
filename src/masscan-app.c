@@ -64,6 +64,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_IPMSG:            return "ipmsg";
     case PROTO_ENIP:             return "enip";
     case PROTO_MDNS:             return "mdns";
+    case PROTO_SQL_BROWSER:      return "sql-browser";
         
     case PROTO_ERROR:           return "error";
             
@@ -134,6 +135,7 @@ masscan_string_to_app(const char *str)
         {"ipmsg",       PROTO_IPMSG},
         {"enip",        PROTO_ENIP},
         {"mdns",        PROTO_MDNS},
+        {"sql-browser", PROTO_SQL_BROWSER},
         {0,0}
     };
     size_t i;
@@ -172,6 +174,7 @@ masscan_app_selftest(void) {
         {PROTO_IPMSG, 51},
         {PROTO_ENIP, 52},
         {PROTO_MDNS, 53},
+        {PROTO_SQL_BROWSER, 54},
         {0,0}
     };
     size_t i;
@@ -237,6 +240,9 @@ masscan_app_selftest(void) {
         return 1;
     if (masscan_string_to_app("mdns") != PROTO_MDNS ||
         strcmp(masscan_app_to_string(PROTO_MDNS), "mdns") != 0)
+        return 1;
+    if (masscan_string_to_app("sql-browser") != PROTO_SQL_BROWSER ||
+        strcmp(masscan_app_to_string(PROTO_SQL_BROWSER), "sql-browser") != 0)
         return 1;
     return 0;
 }
