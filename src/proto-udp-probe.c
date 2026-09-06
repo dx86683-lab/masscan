@@ -125,9 +125,35 @@ bittorrent_classify(const unsigned char *response, unsigned response_length,
     return memcmp(response + 4, expected, sizeof(expected)) == 0;
 }
 
+static int
+mumble_prepare(uint64_t cookie, struct UdpPreparedProbe *result)
+{
+    memset(result->payload, 0, 4);
+    write_u64_be(result->payload + 4, (uint32_t)cookie);
+    result->length = 12;
+    return 1;
+}
+
+static int
+mumble_classify(const unsigned char *response, unsigned response_length,
+                uint64_t cookie)
+{
+    unsigned char expected[8];
+
+    /* Mumble extended Ping echoes an opaque timestamp in a 24-byte reply. */
+    if (response_length != 24)
+        return 0;
+    if (response[0] == 0 && response[1] == 0 &&
+        response[2] == 0 && response[3] == 0)
+        return 0;
+    write_u64_be(expected, (uint32_t)cookie);
+    return memcmp(response + 4, expected, sizeof(expected)) == 0;
+}
+
 static const struct UdpProbeSpec udp_probe_catalog[] = {
     {80, PROTO_QUIC, quic_prepare, quic_classify},
     {6969, PROTO_BITTORRENT, bittorrent_prepare, bittorrent_classify},
+    {64738, PROTO_MUMBLE, mumble_prepare, mumble_classify},
     {0, PROTO_NONE, 0, 0}
 };
 
@@ -191,7 +217,47 @@ udp_probe_catalog_selftest(void)
         0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef
     };
     unsigned char invalid[sizeof(version_negotiation)];
+    unsigned char mumble_response[25] = {
+        0x00, 0x01, 0x05, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x89, 0xab, 0xcd, 0xef,
+        0x00, 0x00, 0x00, 0x02,
+        0x00, 0x00, 0x00, 0x20,
+        0x00, 0x01, 0x1f, 0x40, 0x00
+    };
     unsigned i;
+
+    if (!udp_probe_prepare(64738, cookie, &result) || result.length != 12)
+        return 1;
+    if (memcmp(result.payload,
+               "\x00\x00\x00\x00\x00\x00\x00\x00\x89\xab\xcd\xef", 12))
+        return 1;
+    if (udp_probe_classify(64738, mumble_response, 24, cookie) != PROTO_MUMBLE)
+        return 1;
+    if (udp_probe_classify(64738, mumble_response, 24,
+                           cookie | UINT64_C(0x1234567800000000)) != PROTO_MUMBLE)
+        return 1;
+    for (i = 0; i < 24; i++) {
+        if (udp_probe_classify(64738, mumble_response, i, cookie) != PROTO_NONE)
+            return 1;
+    }
+    if (udp_probe_classify(64738, mumble_response, 25, cookie) != PROTO_NONE)
+        return 1;
+    for (i = 4; i < 12; i++) {
+        mumble_response[i] ^= 1;
+        if (udp_probe_classify(64738, mumble_response, 24, cookie) != PROTO_NONE)
+            return 1;
+        mumble_response[i] ^= 1;
+    }
+    memset(mumble_response, 0, 4);
+    if (udp_probe_classify(64738, mumble_response, 24, cookie) != PROTO_NONE)
+        return 1;
+    mumble_response[1] = 1;
+    memset(mumble_response + 12, 0, 12);
+    if (udp_probe_classify(64738, mumble_response, 24, cookie) != PROTO_MUMBLE)
+        return 1;
+    if (udp_probe_classify(64738, NULL, 0, cookie) != PROTO_NONE ||
+        udp_probe_classify(64738, NULL, 24, cookie) != PROTO_NONE)
+        return 1;
 
     memset(&result, 0xa5, sizeof(result));
     if (udp_probe_prepare(65535, 0, &result) != 0)

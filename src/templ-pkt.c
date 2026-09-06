@@ -1573,6 +1573,16 @@ template_selftest(void)
                        "\x00\x00\x04\x17\x27\x10\x19\x80"
                        "\x00\x00\x00\x00\x89\xab\xcd\xef", 16) != 0;
 
+    template_set_target_ipv4(tmplset, 0x7f000001,
+                             Templ_UDP + 64738, 0x7f000002, 40000,
+                             0x89abcdef, packet, sizeof(packet),
+                             &packet_length);
+    failures += packet_length !=
+        tmplset->pkts[Proto_UDP].ipv4.offset_app + 12;
+    failures += memcmp(packet + tmplset->pkts[Proto_UDP].ipv4.offset_app,
+                       "\x00\x00\x00\x00\x00\x00\x00\x00"
+                       "\x89\xab\xcd\xef", 12) != 0;
+
     if (failures)
         fprintf(stderr, "template: failed\n");
     return failures;

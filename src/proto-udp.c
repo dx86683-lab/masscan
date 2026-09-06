@@ -319,5 +319,37 @@ proto_udp_selftest(void)
         udp_selftest_capture.protocol != PROTO_QUIC)
         return 1;
 
+    parsed.port_src = 64738;
+    parsed.app_length = 24;
+    cookie = syn_cookie(parsed.src_ip, parsed.port_src | Templ_UDP,
+                        parsed.dst_ip, parsed.port_dst, 7);
+    if (!udp_probe_prepare(64738, (uint32_t)cookie, &request))
+        return 1;
+    memset(response, 0, sizeof(response));
+    response[1] = 1;
+    response[2] = 5;
+    memcpy(response + 4, request.payload + 4, 8);
+    memset(&udp_selftest_capture, 0, sizeof(udp_selftest_capture));
+    fp = tmpfile();
+    if (fp == NULL)
+        return 1;
+    out.fp = fp;
+    handle_udp(&out, 0, response, 24, &parsed, 7);
+    fclose(fp);
+    if (udp_selftest_capture.banner_count != 1 ||
+        udp_selftest_capture.protocol != PROTO_MUMBLE)
+        return 1;
+
+    response[11] ^= 1;
+    memset(&udp_selftest_capture, 0, sizeof(udp_selftest_capture));
+    fp = tmpfile();
+    if (fp == NULL)
+        return 1;
+    out.fp = fp;
+    handle_udp(&out, 0, response, 24, &parsed, 7);
+    fclose(fp);
+    if (udp_selftest_capture.protocol == PROTO_MUMBLE)
+        return 1;
+
     return 0;
 }

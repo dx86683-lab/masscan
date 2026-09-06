@@ -47,6 +47,8 @@ enum ApplicationProtocol {
     
     PROTO_ERROR,
 
+    PROTO_MUMBLE,
+
     PROTO_end_of_list /* must be last one */
 };
 
