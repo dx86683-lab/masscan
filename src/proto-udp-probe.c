@@ -502,6 +502,26 @@ rip_classify(const unsigned char *response, unsigned length, uint64_t cookie)
     return response[23] >= 1 && response[23] <= 16;
 }
 
+static int
+ipmi_prepare(uint64_t cookie, const struct UdpProbeTarget *target,
+              struct UdpPreparedProbe *result)
+{
+    (void)target;
+    memcpy(result->payload, "\x06\x00\xff\x06\x00\x00\x11\xbe\x80\x00\x00\x00", 12);
+    result->payload[9] = (unsigned char)((uint32_t)cookie % 255);
+    result->length = 12;
+    return 1;
+}
+
+static int
+ipmi_classify(const unsigned char *response, unsigned length, uint64_t cookie)
+{
+    return length == 28 &&
+           memcmp(response, "\x06\x00\xff\x06\x00\x00\x11\xbe\x40", 9) == 0 &&
+           response[9] == (unsigned char)((uint32_t)cookie % 255) &&
+           response[10] == 0 && response[11] == 16 && (response[20] & 0x80) != 0;
+}
+
 static const struct UdpProbeSpec udp_probe_catalog[] = {
     {80, PROTO_QUIC, quic_prepare, quic_classify},
     {443, PROTO_QUIC, quic_prepare, quic_classify},
@@ -518,6 +538,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {111, PROTO_RPC, rpc_probe_prepare, rpc_probe_classify},
     {2152, PROTO_GTPU, gtpu_prepare, gtpu_classify},
     {520, PROTO_RIP, rip_prepare, rip_classify},
+    {623, PROTO_IPMI, ipmi_prepare, ipmi_classify},
     {0, PROTO_NONE, 0, 0}
 };
 
@@ -600,6 +621,37 @@ udp_probe_catalog_selftest(void)
     };
     unsigned i;
 
+    {
+        unsigned char reply[29] = {
+            6, 0, 255, 6, 0, 0, 0x11, 0xbe, 0x40, 0xf2, 0, 16,
+            0x12, 0x34, 0x56, 0x78, 1, 2, 3, 4, 0x80, 0, 0, 0, 0, 0, 0, 0
+        };
+        if (udp_probe_classify(623, reply, 28, cookie) != PROTO_IPMI)
+            return 1;
+        for (i = 0; i < 28; i++)
+            if (udp_probe_classify(623, reply, i, cookie) != PROTO_NONE) return 1;
+        if (udp_probe_classify(623, reply, 29, cookie) != PROTO_NONE ||
+            udp_probe_classify(623, reply, 28, cookie ^ 1) != PROTO_NONE) return 1;
+        reply[9] = 255;
+        if (udp_probe_classify(623, reply, 28, cookie) != PROTO_NONE) return 1;
+        reply[9] = 0xf2;
+        reply[20] = 1;
+        if (udp_probe_classify(623, reply, 28, cookie) != PROTO_NONE) return 1;
+        reply[20] = 0x81;
+        if (udp_probe_classify(623, reply, 28, cookie) != PROTO_IPMI) return 1;
+        reply[11] = 15;
+        if (udp_probe_classify(623, reply, 28, cookie) != PROTO_NONE) return 1;
+        reply[11] = 16;
+        for (i = 0; i < 9; i++) {
+            reply[i] ^= 1;
+            if (udp_probe_classify(623, reply, 28, cookie) != PROTO_NONE) return 1;
+            reply[i] ^= 1;
+        }
+        if (!udp_probe_prepare(623, cookie, NULL, &result) || result.length != 12 ||
+            memcmp(result.payload, "\x06\x00\xff\x06\x00\x00\x11\xbe\x80\xf2\x00\x00", 12))
+            return 1;
+        if (!udp_probe_prepare(623, 255, NULL, &result) || result.payload[9] != 0) return 1;
+    }
     {
         unsigned char reply[25] = {
             2, 1, 0, 0, 0, 2, 0, 0, 192, 0, 2, 1,

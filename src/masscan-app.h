@@ -56,6 +56,7 @@ enum ApplicationProtocol {
     PROTO_RPC,
     PROTO_GTPU,
     PROTO_RIP,
+    PROTO_IPMI,
 
     PROTO_end_of_list /* must be last one */
 };

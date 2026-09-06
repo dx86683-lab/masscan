@@ -58,6 +58,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_RPC:              return "rpc";
     case PROTO_GTPU:             return "gtpu";
     case PROTO_RIP:              return "rip";
+    case PROTO_IPMI:             return "ipmi";
         
     case PROTO_ERROR:           return "error";
             
@@ -122,6 +123,7 @@ masscan_string_to_app(const char *str)
         {"rpc",         PROTO_RPC},
         {"gtpu",        PROTO_GTPU},
         {"rip",         PROTO_RIP},
+        {"ipmi",        PROTO_IPMI},
         {0,0}
     };
     size_t i;
@@ -154,6 +156,7 @@ masscan_app_selftest(void) {
         {PROTO_RPC, 45},
         {PROTO_GTPU, 46},
         {PROTO_RIP, 47},
+        {PROTO_IPMI, 48},
         {0,0}
     };
     size_t i;
@@ -201,6 +204,9 @@ masscan_app_selftest(void) {
         return 1;
     if (masscan_string_to_app("rip") != PROTO_RIP ||
         strcmp(masscan_app_to_string(PROTO_RIP), "rip") != 0)
+        return 1;
+    if (masscan_string_to_app("ipmi") != PROTO_IPMI ||
+        strcmp(masscan_app_to_string(PROTO_IPMI), "ipmi") != 0)
         return 1;
     return 0;
 }
