@@ -171,9 +171,9 @@ READ(uint64_t r, uint64_t R, uint64_t seed)
     R ^= (seed << r) ^ (seed >> (64 - r));
 
     r0 = sbox[GETBYTE(R,0)]<< 0 | sbox[GETBYTE(R,1)]<< 8;
-    r1 = (sbox[GETBYTE(R,2)]<<16UL | sbox[GETBYTE(R,3)]<<24UL)&0x0ffffFFFFUL;
+    r1 = (sbox[GETBYTE(R,2)]<<16UL | (uint64_t)sbox[GETBYTE(R,3)]<<24UL)&0x0ffffFFFFUL;
     r2 = sbox[GETBYTE(R,4)]<< 0 | sbox[GETBYTE(R,5)]<< 8;
-    r3 = (sbox[GETBYTE(R,6)]<<16UL | sbox[GETBYTE(R,7)]<<24UL)&0x0ffffFFFFUL;
+    r3 = (sbox[GETBYTE(R,6)]<<16UL | (uint64_t)sbox[GETBYTE(R,7)]<<24UL)&0x0ffffFFFFUL;
 
     R = r0 ^ r1 ^ r2<<23UL ^ r3<<33UL;
 
@@ -384,12 +384,20 @@ blackrock_selftest(void)
      */
     {
         struct BlackRock br;
+        static const uint64_t expected[] = {
+            788, 445, 646, 524, 517, 407, 822, 867, 223, 100
+        };
         
         blackrock_init(&br, 1000, 0, 4);
 
-        for (i=0; i<10; i++) {
+        /* Keep shuffle outputs stable when S-box bytes have their high bit set. */
+        for (i=0; i<sizeof(expected)/sizeof(expected[0]); i++) {
             uint64_t result, result2;
             result = blackrock_shuffle(&br, i);
+            if (result != expected[i]) {
+                fprintf(stderr, "BLACKROCK: shuffle vector failed\n");
+                return 1;
+            }
             result2 = blackrock_unshuffle(&br, result);
             if (i != result2)
                 return 1; /*fail*/
