@@ -49,7 +49,9 @@ digi_probe_classify(const unsigned char *data, unsigned length, uint64_t cookie)
         switch (type) {
         case 1: fixed = 6; break;
         case 2: case 3: case 11: case 14: case 15: fixed = 4; break;
-        case 6: case 7: case 10: case 16: case 17: case 18: case 19: fixed = 1; break;
+        case 6: case 7: case 10: case 16: case 17: case 18: fixed = 1; break;
+        /* Encrypted RealPort is a flag in one profile and a 32-bit port in another. */
+        case 19: fixed = size == 4 ? 4 : 1; break;
         case 20: case 24: fixed = 2; break;
         default: break;
         }

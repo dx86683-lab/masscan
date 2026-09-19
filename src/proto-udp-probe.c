@@ -1440,6 +1440,43 @@ udp_probe_catalog_selftest(void)
         }
     }
     {
+        /* Complete ADDP discovery record, including a 32-bit encrypted port. */
+        static const unsigned char reply[] = {
+            0x44, 0x49, 0x47, 0x49, 0x00, 0x02, 0x00, 0x60, 0x01, 0x06, 0x00, 0x40, 0x9d, 0x31, 0xa9, 0x0a,
+            0x02, 0x04, 0x0a, 0x00, 0x00, 0xe7, 0x03, 0x04, 0xff, 0xff, 0xff, 0x00, 0x0b, 0x04, 0x0a, 0x00,
+            0x00, 0x01, 0x0d, 0x0f, 0x44, 0x69, 0x67, 0x69, 0x20, 0x43, 0x6f, 0x6e, 0x6e, 0x65, 0x63, 0x74,
+            0x20, 0x4d, 0x45, 0x10, 0x01, 0x00, 0x07, 0x01, 0x00, 0x08, 0x1e, 0x56, 0x65, 0x72, 0x73, 0x69,
+            0x6f, 0x6e, 0x20, 0x38, 0x32, 0x30, 0x30, 0x30, 0x38, 0x35, 0x36, 0x5f, 0x46, 0x36, 0x20, 0x30,
+            0x37, 0x2f, 0x32, 0x31, 0x2f, 0x32, 0x30, 0x30, 0x36, 0x0e, 0x04, 0x00, 0x00, 0x03, 0x03, 0x13,
+            0x04, 0x00, 0x00, 0x04, 0x03, 0x12, 0x01, 0x01,
+        };
+        static const unsigned char identity[] = "DIGI\x00\x02\x00\x11\x01\x06\x02\x00\x00\x00\x00\x01\x0d\x07" "TestBox";
+        unsigned char changed[sizeof(reply) + 6];
+        unsigned n;
+        if (udp_probe_classify(2362, reply, sizeof(reply), cookie) != PROTO_DIGI) {
+            fprintf(stderr, "digi: 32-bit encrypted port record rejected\n"); return 1;
+        }
+        for (n = 0; n < sizeof(reply); n++)
+            if (udp_probe_classify(2362, reply, n, cookie) != PROTO_NONE) return 1;
+        for (n = 0; n <= 5; n++) {
+            unsigned length = sizeof(identity) - 1 + 2 + n;
+            memcpy(changed, identity, sizeof(identity) - 1);
+            changed[7] = (unsigned char)(length - 8);
+            changed[sizeof(identity) - 1] = 0x13;
+            changed[sizeof(identity)] = (unsigned char)n;
+            memset(changed + sizeof(identity) + 1, 0, n);
+            if (udp_probe_classify(2362, changed, length, cookie) !=
+                ((n == 1 || n == 4) ? PROTO_DIGI : PROTO_NONE)) return 1;
+        }
+        memcpy(changed, reply, sizeof(reply));
+        changed[sizeof(reply)] = 0x13; changed[sizeof(reply) + 1] = 4;
+        memset(changed + sizeof(reply) + 2, 0, 4); changed[7] += 6;
+        if (udp_probe_classify(2362, changed, sizeof(reply) + 6, cookie) != PROTO_NONE) return 1;
+        memcpy(changed, reply, sizeof(reply)); changed[5] = 1;
+        if (udp_probe_classify(2362, changed, sizeof(reply), cookie) != PROTO_NONE ||
+            udp_probe_classify(2363, reply, sizeof(reply), cookie) != PROTO_NONE) return 1;
+    }
+    {
         static const struct { enum ApplicationProtocol expected; const char *reply; } cases[] = {
             {PROTO_HID, "discovered;080;00-06-8E-12-34-56;NoEntry;192.0.2.1;2;EH400;2.3.1.603;04/23/2012;"},
             {PROTO_HID, "discovered;079;00-06-8E-12-34-56;NoExit;192.0.2.1;1;EH400;2.3.1.603;04/23/2012;"},
