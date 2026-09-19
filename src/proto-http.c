@@ -107,7 +107,8 @@ _http_insert(unsigned char **r_hdr, size_t start, size_t end, size_t header_leng
     size_t new_header_length = header_length + field_length - old_field_length;
     unsigned char *hdr;
 
-    *r_hdr = REALLOC(*r_hdr, new_header_length + 1);
+    if (new_header_length > header_length)
+        *r_hdr = REALLOC(*r_hdr, new_header_length + 1);
     hdr = *r_hdr;
     
     /* Shrink/expand the field */
@@ -115,6 +116,10 @@ _http_insert(unsigned char **r_hdr, size_t start, size_t end, size_t header_leng
 
     /* Insert the new header at this location */
     memcpy(&hdr[start], field, field_length);
+
+    /* Keep the tail readable until it has moved into the shorter buffer. */
+    if (new_header_length < header_length)
+        *r_hdr = REALLOC(*r_hdr, new_header_length + 1);
 
     return new_header_length;
 }
@@ -361,7 +366,7 @@ http_change_field(unsigned char **inout_header, size_t header_length,
         /* Replace existing field */
         memmove(&hdr[offset + name_length + 2 + value_length + 2],
                 &hdr[next_offset],
-                header_length - offset + 1);
+                header_length - next_offset + 1);
         header_length += (name_length + 2 + value_length + 2) - (next_offset - offset);
     } else {
         /* Add a new field onto the end */
@@ -775,6 +780,7 @@ http_selftest_config(void)
         {"", "POST"},
         {"GET / HTTP/1.0\r\n\r\n", "POST / HTTP/1.0\r\n\r\n"},
         {"O  /  HTTP/1.0\r\n\r\n", "POST  /  HTTP/1.0\r\n\r\n"},
+        {"OPTIONS / HTTP/1.0\r\nHost: example\r\n\r\nbody", "POST / HTTP/1.0\r\nHost: example\r\n\r\nbody"},
         {0,0}
     };
     static const struct {const char *from; const char *to;} versionsamples[] = {
@@ -787,6 +793,7 @@ http_selftest_config(void)
         {"GET / HTTP/1.0\r\nfoobar: a\r\nHost: xyz\r\n\r\n", "GET / HTTP/1.0\r\nfoobar: a\r\nHost: xyz\r\nfoo: bar\r\n\r\n"},
         {"GET / HTTP/1.0\r\nfoo:abc\r\nHost: xyz\r\n\r\n", "GET / HTTP/1.0\r\nfoo: bar\r\nHost: xyz\r\n\r\n"},
         {"GET / HTTP/1.0\r\nfoo: abcdef\r\nHost: xyz\r\n\r\n", "GET / HTTP/1.0\r\nfoo: bar\r\nHost: xyz\r\n\r\n"},
+        {"GET / HTTP/1.0\r\nfoo: abcdefghijklmnopqrstuvwxyz0123456789\r\nHost: xyz\r\n\r\nbody", "GET / HTTP/1.0\r\nfoo: bar\r\nHost: xyz\r\n\r\nbody"},
         {"GET / HTTP/1.0\r\nfoo: a\r\nHost: xyz\r\n\r\n", "GET / HTTP/1.0\r\nfoo: bar\r\nHost: xyz\r\n\r\n"},
         {"GET / HTTP/1.0\r\nHost: xyz\r\n\r\n", "GET / HTTP/1.0\r\nHost: xyz\r\nfoo: bar\r\n\r\n"},
         {0,0}
@@ -799,6 +806,7 @@ http_selftest_config(void)
     static const struct {const char *from; const char *to;} payloadsamples[] = {
         {"",  "GET / HTTP/1.0\r\n\r\nfoo"},
         {"GET / HTTP/1.0\r\nHost: xyz\r\n\r\nbar", "GET / HTTP/1.0\r\nHost: xyz\r\n\r\nfoo"},
+        {"GET / HTTP/1.0\r\nHost: xyz\r\n\r\nlong payload", "GET / HTTP/1.0\r\nHost: xyz\r\n\r\nfoo"},
         {0,0}
     };
 
@@ -812,10 +820,12 @@ http_selftest_config(void)
         /* Replace whatever URL is in the header with this new one */
         len2 = http_change_requestline(&x, len1, "/foo.html", ~(size_t)0, 1);
 
-        if (len2 != len3 && memcmp(urlsamples[i].to, x, len3) != 0) {
+        if (len2 != len3 || memcmp(urlsamples[i].to, x, len3 + 1) != 0) {
             fprintf(stderr, "[-] HTTP.selftest: config URL sample #%u\n", (unsigned)i);
+            free(x);
             return 1;
         }
+        free(x);
     }
 
     /* Test replacing method */
@@ -827,10 +837,12 @@ http_selftest_config(void)
         
         len2 = http_change_requestline(&x, len1, "POST", ~(size_t)0, 0);
 
-        if (len2 != len3 && memcmp(methodsamples[i].to, x, len3) != 0) {
+        if (len2 != len3 || memcmp(methodsamples[i].to, x, len3 + 1) != 0) {
             fprintf(stderr, "[-] HTTP.selftest: config method sample #%u\n", (unsigned)i);
+            free(x);
             return 1;
         }
+        free(x);
     }
 
     /* Test replacing version */
@@ -842,10 +854,12 @@ http_selftest_config(void)
         
         len2 = http_change_requestline(&x, len1, "HTTP/1.1", ~(size_t)0, 2);
 
-        if (len2 != len3 && memcmp(versionsamples[i].to, x, len3) != 0) {
+        if (len2 != len3 || memcmp(versionsamples[i].to, x, len3 + 1) != 0) {
             fprintf(stderr, "[-] HTTP.selftest: config version sample #%u\n", (unsigned)i);
+            free(x);
             return 1;
         }
+        free(x);
     }
 
     /* Test payload */
@@ -857,10 +871,12 @@ http_selftest_config(void)
         
         len2 = http_change_requestline(&x, len1, "foo", ~(size_t)0, 3);
 
-        if (len2 != len3 && memcmp(payloadsamples[i].to, x, len3) != 0) {
+        if (len2 != len3 || memcmp(payloadsamples[i].to, x, len3 + 1) != 0) {
             fprintf(stderr, "[-] HTTP.selftest: config payload sample #%u\n", (unsigned)i);
+            free(x);
             return 1;
         }
+        free(x);
     }
 
     /* Test adding fields */
@@ -873,8 +889,9 @@ http_selftest_config(void)
         /* Replace whatever URL is in the header with this new one */
         x = (unsigned char*)STRDUP(fieldsamples[i].from);
         len2 = http_change_field(&x, len1, "foo", (const unsigned char *)"bar", ~(size_t)0, http_field_replace);
-        if (len2 != len3 || memcmp(fieldsamples[i].to, x, len3) != 0) {
+        if (len2 != len3 || memcmp(fieldsamples[i].to, x, len3 + 1) != 0) {
             fprintf(stderr, "[-] HTTP.selftest: config header field sample #%u\n", (unsigned)i);
+            free(x);
             return 1;
         }
         free(x);
@@ -882,8 +899,9 @@ http_selftest_config(void)
         /* Same test as above, but when name specified with a colon */
         x = (unsigned char*)STRDUP(fieldsamples[i].from);
         len2 = http_change_field(&x, len1, "foo:", (const unsigned char *)"bar", ~(size_t)0, http_field_replace);
-        if (len2 != len3 || memcmp(fieldsamples[i].to, x, len3) != 0) {
+        if (len2 != len3 || memcmp(fieldsamples[i].to, x, len3 + 1) != 0) {
             fprintf(stderr, "[-] HTTP.selftest: config header field sample #%u\n", (unsigned)i);
+            free(x);
             return 1;
         }
         free(x);
@@ -891,8 +909,9 @@ http_selftest_config(void)
         /* Same test as above, but with name having additional space */
         x = (unsigned char*)STRDUP(fieldsamples[i].from);
         len2 = http_change_field(&x, len1, "foo : : ", (const unsigned char *)"bar", ~(size_t)0, http_field_replace);
-        if (len2 != len3 || memcmp(fieldsamples[i].to, x, len3) != 0) {
+        if (len2 != len3 || memcmp(fieldsamples[i].to, x, len3 + 1) != 0) {
             fprintf(stderr, "[-] HTTP.selftest: config header field sample #%u\n", (unsigned)i);
+            free(x);
             return 1;
         }
         free(x);
@@ -949,4 +968,3 @@ struct ProtocolParserStream banner_http = {
     http_init,
     http_parse,
 };
-
