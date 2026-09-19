@@ -481,13 +481,15 @@ static unsigned
 partial_checksum(const unsigned char *px, size_t icmp_length)
 {
     uint64_t xsum = 0;
-    unsigned i;
+    size_t i;
 
-    for (i=0; i<icmp_length; i += 2) {
+    for (i=0; i + 1 < icmp_length; i += 2) {
         xsum += px[i]<<8 | px[i + 1];
     }
 
-    xsum -= (icmp_length & 1) * px[i - 1]; /* yea I know going off end of packet is bad so sue me */
+    /* RFC 1071 pads an odd trailing octet with a zero low byte. */
+    if (i < icmp_length)
+        xsum += px[i] << 8;
     xsum = (xsum & 0xFFFF) + (xsum >> 16);
     xsum = (xsum & 0xFFFF) + (xsum >> 16);
     xsum = (xsum & 0xFFFF) + (xsum >> 16);
@@ -901,5 +903,21 @@ payloads_oproto_create(void)
 
 int
 templ_payloads_selftest(void) {
-    return templ_nmap_selftest();
+    struct PayloadsUDP *payloads = payloads_udp_create();
+    const unsigned char *payload = NULL;
+    unsigned length = 0;
+    unsigned source_port = 0;
+    uint64_t xsum = 0;
+    SET_COOKIE set_cookie = NULL;
+    int failures = templ_nmap_selftest();
+
+    /* The odd-length DNS payload needs no byte beyond its declared end. */
+    if (!payloads_udp_lookup(payloads, 53, &payload, &length,
+                             &source_port, &xsum, &set_cookie)
+        || length != 31 || xsum != 0x737b) {
+        fprintf(stderr, "[-] payloads: odd-length checksum selftest failed\n");
+        failures++;
+    }
+    payloads_udp_destroy(payloads);
+    return failures;
 }
