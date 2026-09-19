@@ -2287,6 +2287,55 @@ udp_probe_catalog_selftest(void)
             if (udp_probe_classify(500, changed, 152, cookie) != PROTO_IKEV2) return 1;
         }
         {
+            unsigned char notify[160], changed[168];
+            unsigned n;
+            memcpy(notify, reply, 152);
+            notify[116] = 41; notify[27] = sizeof(notify);
+            /* RFC4739 3.1: MULTIPLE_AUTH_SUPPORTED has no SPI or data. */
+            memcpy(notify + 152, "\x00\x00\x00\x08\x00\x00\x40\x14", 8);
+            if (udp_probe_classify(500, notify, sizeof(notify), cookie) != PROTO_IKEV2) {
+                fprintf(stderr, "ikev2: MULTIPLE_AUTH_SUPPORTED response rejected\n"); return 1;
+            }
+            if (udp_probe_classify(500, notify, sizeof(notify), cookie ^ 1) != PROTO_NONE) return 1;
+            for (n = 0; n < sizeof(notify); n++)
+                if (udp_probe_classify(500, notify, n, cookie) != PROTO_NONE) return 1;
+            for (n = 4; n <= 12; n++) {
+                if (n == 8) continue;
+                memset(changed, 0, sizeof(changed));
+                memcpy(changed, notify, sizeof(notify));
+                changed[155] = (unsigned char)n; changed[27] = (unsigned char)(152 + n);
+                if (udp_probe_classify(500, changed, 152 + n, cookie) != PROTO_NONE) return 1;
+            }
+            memcpy(changed, notify, sizeof(notify)); changed[157] = 1;
+            if (udp_probe_classify(500, changed, sizeof(notify), cookie) != PROTO_NONE) return 1;
+            memcpy(changed, notify, sizeof(notify)); changed[0] ^= 1;
+            if (udp_probe_classify(500, changed, sizeof(notify), cookie) != PROTO_NONE) return 1;
+            memcpy(changed, notify, sizeof(notify)); changed[20] = 1;
+            if (udp_probe_classify(500, changed, sizeof(notify), cookie) != PROTO_NONE) return 1;
+            memcpy(changed, notify, sizeof(notify)); memset(changed + 8, 0, 8);
+            if (udp_probe_classify(500, changed, sizeof(notify), cookie) != PROTO_NONE) return 1;
+            memcpy(changed, notify, sizeof(notify)); memset(changed + 84, 0, 32);
+            if (udp_probe_classify(500, changed, sizeof(notify), cookie) != PROTO_NONE) return 1;
+            memcpy(changed, notify, sizeof(notify)); changed[152] = 41;
+            if (udp_probe_classify(500, changed, sizeof(notify), cookie) != PROTO_NONE) return 1;
+            memcpy(changed, notify, sizeof(notify)); changed[27] = 161; changed[160] = 0;
+            if (udp_probe_classify(500, changed, 161, cookie) != PROTO_NONE) return 1;
+            memcpy(changed, notify, sizeof(notify)); changed[156] = 1;
+            if (udp_probe_classify(500, changed, sizeof(notify), cookie) != PROTO_IKEV2) return 1;
+            memcpy(changed, notify, sizeof(notify)); changed[153] = 0x80;
+            if (udp_probe_classify(500, changed, sizeof(notify), cookie) != PROTO_IKEV2) return 1;
+            memcpy(changed, notify, sizeof(notify));
+            memcpy(changed + 52, notify + 60, 8); memcpy(changed + 60, notify + 52, 8);
+            if (udp_probe_classify(500, changed, sizeof(notify), cookie) != PROTO_IKEV2) return 1;
+            memcpy(changed, notify, 28); changed[16] = 41;
+            memcpy(changed + 28, notify + 152, 8); changed[28] = 33;
+            memcpy(changed + 36, reply + 28, 124);
+            if (udp_probe_classify(500, changed, sizeof(notify), cookie) != PROTO_IKEV2) return 1;
+            memcpy(changed, notify, 28); changed[16] = 41; changed[27] = 36;
+            memcpy(changed + 28, notify + 152, 8);
+            if (udp_probe_classify(500, changed, 36, cookie) != PROTO_NONE) return 1;
+        }
+        {
             unsigned char notify[36] = {0}, changed[180];
             static const unsigned types[] = {7, 14};
             static const unsigned offsets[] = {0, 7, 16, 17, 18, 19, 20, 24, 27, 28, 30, 31, 33, 34, 35};

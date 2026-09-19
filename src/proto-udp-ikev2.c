@@ -141,6 +141,9 @@ ikev2_probe_classify(const unsigned char *data, unsigned length, uint64_t cookie
             if (type == 7 || type == 14) {
                 if (size != 8) return 0;
                 bit = 8;
+            } else if (type == 16404) {
+                /* RFC4739 3.1: an optional IKE_SA_INIT capability notice. */
+                if (size != 8) return 0;
             } else if (size != 28 || (type != 16388 && type != 16389)) return 0;
         } else if (next == 43) {
             if (size < 5) return 0;
