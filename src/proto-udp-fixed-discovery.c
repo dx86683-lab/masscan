@@ -73,11 +73,30 @@ db2_probe_classify(const unsigned char *data, unsigned length, uint64_t cookie)
 {
     unsigned i;
     (void)cookie;
-    if (length < 22 || length > 276 || memcmp(data, "DB2RETADDR\x00" "SQL", 14) ||
+    if (length < 22 || (length > 276 && length != 298) || memcmp(data, "DB2RETADDR\x00" "SQL", 14) ||
         data[19] || data[length - 1]) return 0;
     for (i = 14; i < 18; i++) if (data[i] < '0' || data[i] > '9') return 0;
     if (!((data[18] >= '0' && data[18] <= '9') ||
           (data[18] >= 'A' && data[18] <= 'Z'))) return 0;
+    if (length == 298) {
+        unsigned field;
+        /* The padded DAS profile has two complete, zero-filled name fields. */
+        for (field = 0; field < 2; field++) {
+            unsigned start = field ? 42 : 20;
+            unsigned end = field ? 298 : 42;
+            unsigned terminated = 0;
+            if (!data[start]) return 0;
+            for (i = start; i < end; i++) {
+                unsigned c = data[i];
+                if (!c) terminated = 1;
+                else if (terminated ||
+                    !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                      (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_')) return 0;
+            }
+            if (!terminated) return 0;
+        }
+        return 1;
+    }
     for (i = 20; i < length - 1; i++) {
         unsigned c = data[i];
         if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||

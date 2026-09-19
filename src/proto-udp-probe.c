@@ -1514,6 +1514,40 @@ udp_probe_catalog_selftest(void)
         }
     }
     {
+        unsigned char extended[299] = {0}, changed[299];
+        unsigned n;
+        /* DB2 DAS replies can contain 22- and 256-byte padded name fields. */
+        memcpy(extended, "DB2RETADDR\x00" "SQL0907B\x00", 20);
+        memcpy(extended + 20, "DBHOST", 6);
+        memcpy(extended + 42, "dbhost.example", 14);
+        if (udp_probe_classify(523, extended, 298, cookie) != PROTO_DB2) {
+            fprintf(stderr, "db2: padded discovery reply rejected\n"); return 1;
+        }
+        for (n = 0; n < 298; n++) {
+            /* The first name alone is also a complete compact reply. */
+            if (n == 27) continue;
+            if (udp_probe_classify(523, extended, n, cookie) != PROTO_NONE) return 1;
+        }
+        if (udp_probe_classify(523, extended, 299, cookie) != PROTO_NONE ||
+            udp_probe_classify(524, extended, 298, cookie) != PROTO_NONE) return 1;
+        {
+            static const unsigned bad_offsets[] = {0, 10, 19, 20, 26, 41, 42, 56, 297};
+            for (n = 0; n < sizeof(bad_offsets) / sizeof(*bad_offsets); n++) {
+                memcpy(changed, extended, sizeof(changed));
+                changed[bad_offsets[n]] = '!';
+                if (udp_probe_classify(523, changed, 298, cookie) != PROTO_NONE) return 1;
+            }
+        }
+        memcpy(changed, extended, sizeof(changed)); memset(changed + 20, 0, 22);
+        if (udp_probe_classify(523, changed, 298, cookie) != PROTO_NONE) return 1;
+        memcpy(changed, extended, sizeof(changed)); memset(changed + 42, 0, 256);
+        if (udp_probe_classify(523, changed, 298, cookie) != PROTO_NONE) return 1;
+        memcpy(changed, extended, sizeof(changed)); memset(changed + 20, 'A', 22);
+        if (udp_probe_classify(523, changed, 298, cookie) != PROTO_NONE) return 1;
+        memcpy(changed, extended, sizeof(changed)); memset(changed + 42, 'A', 256);
+        if (udp_probe_classify(523, changed, 298, cookie) != PROTO_NONE) return 1;
+    }
+    {
         static const unsigned char padded[] = "NRLAB___AHM_3___";
         static const unsigned char plain[] = "NRLABAHM_3___";
         static const unsigned char unnamed[] = "NRAHM_3___";
