@@ -69,6 +69,7 @@
 #include "proto-oproto.h"       /* Other protocols on top of IP */
 #include "util-malloc.h"
 #include "util-checksum.h"
+#include "util-extract.h"
 
 #include <assert.h>
 #include <limits.h>
@@ -1844,6 +1845,7 @@ int main(int argc, char *argv[])
             x += ranges6_selftest();
             x += dedup_selftest();
             x += checksum_selftest();
+            x += e_extract_selftest();
             x += ipv4address_selftest();
             x += ipv6address_selftest();
             x += proto_coap_selftest();
