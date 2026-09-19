@@ -29,21 +29,22 @@ citrix_probe_classify(const unsigned char *px, unsigned length, uint64_t cookie)
     /* The list layout is documented by the Nmap script author. Restrict the
      * header profile to the independently published reply, without assigning
      * semantics to the remaining bytes within its fixed 40-byte header. */
-    if (length < 42 || length > 65535)
+    if (length < 40 || length > 65535)
         return 0;
     if (((unsigned)px[0] | (unsigned)px[1] << 8) != length
         || memcmp(px + 2, response_profile, sizeof(response_profile))
         || px[30] > 1)
         return 0;
+    /* A final response can contain a complete header and no applications. */
+    if (length == 40)
+        return px[30] == 1;
 
-    /* This bounded profile accepts nonempty ASCII application names. A more
-     * flag of zero still identifies one complete datagram; no reassembly or
-     * follow-up query is required for service identification. */
+    /* Application names are NUL-terminated byte strings; their encoding is
+     * not interpreted. A more flag of zero still identifies one complete
+     * datagram; no reassembly or follow-up query is needed for identification. */
     while (offset < length) {
         unsigned start = offset;
         while (offset < length && px[offset]) {
-            if (px[offset] < 0x20 || px[offset] > 0x7e)
-                return 0;
             offset++;
         }
         if (offset == start || offset == length)
@@ -120,6 +121,47 @@ citrix_selftest(void)
     } \
 } while (0)
 
+    {
+        static const unsigned char empty_final[] =
+            "\x28\x00\x04\x33\x02\xfd\xa8\xe3\x02\x00\x06\x44"
+            "\xc0\x00\x02\x01\x00\x00\x00\x00\x00\x00\x00\x00"
+            "\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\x00"
+            "\x00\x00\x00\x00";
+        /* A complete empty final list has only its 40-byte header. */
+        CHECK_CITRIX(citrix_probe_classify(empty_final, sizeof(empty_final) - 1, 0),
+                     "complete empty final application list");
+        for (i = 0; i < sizeof(empty_final) - 1; i++)
+            CHECK_CITRIX(!citrix_probe_classify(empty_final, i, 0),
+                         "truncated empty application list");
+        memcpy(altered, empty_final, sizeof(empty_final));
+        altered[0] = 39;
+        CHECK_CITRIX(!citrix_probe_classify(altered, 40, 0), "empty list short declared length");
+        altered[0] = 41;
+        CHECK_CITRIX(!citrix_probe_classify(altered, 40, 0), "empty list long declared length");
+        CHECK_CITRIX(!citrix_probe_classify(altered, 41, 0), "empty trailing name is not an empty list");
+        altered[0] = 40; altered[30] = 0;
+        CHECK_CITRIX(!citrix_probe_classify(altered, 40, 0), "unsupported empty continuation");
+        altered[30] = 2;
+        CHECK_CITRIX(!citrix_probe_classify(altered, 40, 0), "empty list invalid final flag");
+        altered[30] = 1; altered[3] = 0x32;
+        CHECK_CITRIX(!citrix_probe_classify(altered, 40, 0), "empty list wrong response type");
+    }
+    {
+        /* Complete captured byte-string response; names and address anonymized. */
+        static const unsigned char byte_names[] =
+            "\x9a\x00\x04\x33\x02\xfd\xa8\xe3\x02\x00\x06\x44\xc0\x00\x02\x01"
+            "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00"
+            "\x05\x00\x28\x00\x00\x00\x00\x00\x41\x41\x41\x41\x41\x41\x41\x41"
+            "\x41\x41\x41\x41\xf3\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41"
+            "\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x00\x41\x41\x41\x41"
+            "\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41"
+            "\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x00\x41\x41\x41"
+            "\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x41\x00"
+            "\x41\x41\x41\x41\x41\x41\x41\x00\x41\x41\x41\x41\x41\x41\x41\x41"
+            "\x41\x41\x41\x41\x41\x41\x41\x41\x41\x00";
+        CHECK_CITRIX(citrix_probe_classify(byte_names, sizeof(byte_names) - 1, 0),
+                     "complete byte-string application list");
+    }
     memset(&probe, 0, sizeof(probe));
     CHECK_CITRIX(citrix_probe_prepare(0x12345678, 0, &probe),
                  "application-list request preparation");
@@ -187,11 +229,11 @@ citrix_selftest(void)
     CHECK_CITRIX(!citrix_probe_classify(altered, sizeof(citrix_list_fixture), 0),
                  "empty first name");
     altered[40] = 0x1b;
-    CHECK_CITRIX(!citrix_probe_classify(altered, sizeof(citrix_list_fixture), 0),
-                 "control byte in name");
+    CHECK_CITRIX(citrix_probe_classify(altered, sizeof(citrix_list_fixture), 0),
+                 "opaque name byte is not interpreted as text");
     altered[40] = 0x80;
-    CHECK_CITRIX(!citrix_probe_classify(altered, sizeof(citrix_list_fixture), 0),
-                 "unsupported non-ASCII name encoding");
+    CHECK_CITRIX(citrix_probe_classify(altered, sizeof(citrix_list_fixture), 0),
+                 "high-bit name byte is encoding independent");
     memcpy(altered, citrix_list_fixture, 40);
     altered[0] = 40;
     altered[1] = 0;
