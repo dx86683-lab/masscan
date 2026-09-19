@@ -131,7 +131,8 @@ handle_udp(struct Output *out, time_t timestamp,
             probe_protocol == PROTO_GARDASOFT || probe_protocol == PROTO_GARDASOFT_VERSION ||
             probe_protocol == PROTO_VENTRILO || probe_protocol == PROTO_SERIALNUMBERD ||
             probe_protocol == PROTO_HIKVISION || probe_protocol == PROTO_FINS ||
-            probe_protocol == PROTO_DAHUA || probe_protocol == PROTO_ANDROMOUSE) {
+            probe_protocol == PROTO_DAHUA || probe_protocol == PROTO_ANDROMOUSE ||
+            probe_protocol == PROTO_ECOM) {
             banner_data = (const unsigned char *)"discovery-response";
             banner_length = 18;
         }
@@ -509,6 +510,9 @@ proto_udp_selftest(void)
                 "\xd9\xc1\xb7\xd8\x1e\x69\x5b\x81\xa5\xa1\xbf\x12\xe0\x98\x7a\xcb\x39\xad\x7b\x98\xb0\x66\x23\x9b\x8e"},
             {626, sizeof(serial_reply), PROTO_SERIALNUMBERD, serial_reply},
             {8888, 7, PROTO_ANDROMOUSE, "GOTBACK"},
+            {28784, 24, PROTO_ECOM,
+                "\x48\x41\x50\x01\x00\x40\x73\x0f\x00\x55\xaa\x00"
+                "\xe0\x62\x20\xa1\x32\x00\x01\xc0\xa8\x01\x28\x00"},
 #ifdef UDP_EXTENDED_PROBES
             {37020, sizeof(sadp_reply) - 1, PROTO_HIKVISION, sadp_reply},
             {37810, 182, PROTO_DAHUA,
@@ -527,6 +531,12 @@ proto_udp_selftest(void)
                                     parsed.dst_ip, parsed.port_dst, 7);
                 if (!udp_probe_prepare(3784, cookie, NULL, &request)) return 1;
                 memcpy(packet + 6, request.payload + 6, 2);
+            }
+            if (parsed.port_src == 28784) {
+                cookie = syn_cookie(parsed.src_ip, 28784 | Templ_UDP,
+                                    parsed.dst_ip, parsed.port_dst, 7);
+                if (!udp_probe_prepare(28784, cookie, NULL, &request)) return 1;
+                memcpy(packet + 3, request.payload + 3, 2);
             }
             if (parsed.port_src == 5050) {
                 unsigned crc = 0, i, b;

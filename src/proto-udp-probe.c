@@ -26,6 +26,7 @@
 #include "proto-udp-fixed-discovery.h"
 #include "proto-udp-structured-discovery.h"
 #include "proto-udp-ventrilo.h"
+#include "proto-udp-ecom.h"
 #include "proto-udp-text-discovery.h"
 #include "proto-udp-fins.h"
 #include "proto-udp-dahua.h"
@@ -898,6 +899,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {626, PROTO_SERIALNUMBERD, serialnumberd_probe_prepare, serialnumberd_probe_classify},
     {9600, PROTO_FINS, fins_probe_prepare, fins_probe_classify},
     {8888, PROTO_ANDROMOUSE, andromouse_probe_prepare, andromouse_probe_classify},
+    {28784, PROTO_ECOM, ecom_probe_prepare, ecom_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {37020, PROTO_HIKVISION, hikvision_probe_prepare, hikvision_probe_classify},
     {37810, PROTO_DAHUA, dahua_probe_prepare, dahua_probe_classify},
@@ -1062,6 +1064,19 @@ udp_probe_catalog_selftest(void)
 {
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
+    if (ecom_selftest()) return 1;
+    {
+        static const unsigned char reply[] =
+            "\x48\x41\x50\x01\x00\x40\x73\x0f\x00\x55\xaa\x00"
+            "\xe0\x62\x20\xa1\x32\x00\x01\xc0\xa8\x01\x28\x00";
+        if (masscan_string_to_app("ecom") != PROTO_ECOM ||
+            !udp_probe_is_registered(28784) ||
+            !udp_probe_prepare(28784, 1, NULL, &result) || result.length != 10 ||
+            strcmp(masscan_app_to_string(udp_probe_classify(28784, reply,
+                sizeof(reply) - 1, 1)), "ecom") != 0) {
+            fprintf(stderr, "ecom: catalog query-response pair failed\n"); return 1;
+        }
+    }
     {
         static const unsigned char reply[] = "GOTBACK";
         unsigned char changed[8];
