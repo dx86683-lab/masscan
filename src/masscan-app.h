@@ -102,6 +102,7 @@ enum ApplicationProtocol {
     PROTO_ANDROMOUSE,
     PROTO_ECOM,
     PROTO_CITRIX,
+    PROTO_VSTARCAM,
 
     PROTO_end_of_list /* must be last one */
 };

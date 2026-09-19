@@ -28,6 +28,7 @@
 #include "proto-udp-ventrilo.h"
 #include "proto-udp-ecom.h"
 #include "proto-udp-citrix.h"
+#include "proto-udp-vstarcam.h"
 #include "proto-udp-text-discovery.h"
 #include "proto-udp-fins.h"
 #include "proto-udp-dahua.h"
@@ -902,6 +903,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {8888, PROTO_ANDROMOUSE, andromouse_probe_prepare, andromouse_probe_classify},
     {28784, PROTO_ECOM, ecom_probe_prepare, ecom_probe_classify},
     {1604, PROTO_CITRIX, citrix_probe_prepare, citrix_probe_classify},
+    {8600, PROTO_VSTARCAM, vstarcam_probe_prepare, vstarcam_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {37020, PROTO_HIKVISION, hikvision_probe_prepare, hikvision_probe_classify},
     {37810, PROTO_DAHUA, dahua_probe_prepare, dahua_probe_classify},
@@ -1067,6 +1069,19 @@ udp_probe_catalog_selftest(void)
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
     {
+        struct UdpProbeTarget target = {0};
+        target.source.version = target.destination.version = 4;
+        target.source_port = 8601;
+        if (masscan_string_to_app("vstarcam") != PROTO_VSTARCAM ||
+            !udp_probe_is_registered(8600) ||
+            !udp_probe_prepare(8600, cookie, &target, &result) ||
+            result.length != 4 || memcmp(result.payload, "\x44\x48\x01\x01", 4)) {
+            fprintf(stderr, "vstarcam: catalog discovery preparation failed\n"); return 1;
+        }
+        target.source_port = 40000;
+        if (udp_probe_prepare(8600, cookie, &target, &result)) return 1;
+    }
+    {
         unsigned char reply[44] = {44, 0, 4, 0x33, 2, 0xfd, 0xa8, 0xe3};
         memcpy(reply + 40, "App", 4);
         if (masscan_string_to_app("citrix") != PROTO_CITRIX ||
@@ -1077,7 +1092,7 @@ udp_probe_catalog_selftest(void)
             fprintf(stderr, "citrix: catalog list datagram failed\n"); return 1;
         }
     }
-    if (ecom_selftest() || citrix_selftest()) return 1;
+    if (ecom_selftest() || citrix_selftest() || vstarcam_selftest()) return 1;
     {
         static const unsigned char reply[] =
             "\x48\x41\x50\x01\x00\x40\x73\x0f\x00\x55\xaa\x00"
