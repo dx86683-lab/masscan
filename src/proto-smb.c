@@ -283,7 +283,7 @@ smb_params_parse(struct SMBSTUFF *smb, const unsigned char *px, size_t offset, s
             {
                 uint32_t *x = memberat(uint32_t, &smb->parms, params[c].internal_offset);
                 //*x <<= 8;
-                *x |= px[offset] << ((smb->hdr.smb1.param_offset - params[c].external_offset)*8);
+                *x |= (uint32_t)px[offset] << ((smb->hdr.smb1.param_offset - params[c].external_offset)*8);
             }
                 break;
             case IT_uint64:
@@ -1924,6 +1924,35 @@ smb_selftest(void)
 {
     int x = 0;
 
+    {
+        static const struct {
+            unsigned char bytes[4];
+            uint32_t expected;
+        } cases[] = {
+            {{0x12, 0x34, 0x56, 0x7f}, 0x7f563412U},
+            {{0x12, 0x34, 0x56, 0x80}, 0x80563412U},
+            {{0xff, 0xff, 0xff, 0xff}, 0xffffffffU}
+        };
+        size_t i;
+        size_t split;
+
+        for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+            for (split = 0; split <= 4; split++) {
+                struct SMBSTUFF smb;
+                memset(&smb, 0, sizeof(smb));
+                smb.hdr.smb1.command = 0x72;
+                smb.hdr.smb1.param_offset = 15;
+                smb.hdr.smb1.param_length = 19;
+                if (smb_params_parse(&smb, cases[i].bytes, 0, split) != split ||
+                    smb_params_parse(&smb, cases[i].bytes, split, 4) != 4 - split ||
+                    smb.parms.negotiate.SessionKey != cases[i].expected) {
+                    fprintf(stderr, "smb: unsigned parameter selftest failed\n");
+                    return 1;
+                }
+            }
+        }
+    }
+
     /*****************************************************************************
      *****************************************************************************/
     {
@@ -2094,4 +2123,3 @@ struct ProtocolParserStream banner_smb1 = {
     smb_parse_record,
     smb_cleanup
 };
-
