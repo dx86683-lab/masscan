@@ -1486,6 +1486,17 @@ udp_probe_catalog_selftest(void)
                 if (udp_probe_classify(port, changed, length, 0x1234) != PROTO_NONE) return 1;
             } else if (port == 523) {
                 static const unsigned offsets[] = {10, 14, 19, 20, 26};
+                static const char modifications[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+                for (n = 0; n < sizeof(modifications) - 1; n++) {
+                    memcpy(changed, reply, length); changed[18] = modifications[n];
+                    if (udp_probe_classify(port, changed, length, 0x1234) != PROTO_DB2) {
+                        fprintf(stderr, "db2: product modification level rejected\n"); return 1;
+                    }
+                }
+                memcpy(changed, reply, length); changed[18] = '!';
+                if (udp_probe_classify(port, changed, length, 0x1234) != PROTO_NONE) return 1;
+                changed[18] = 'b';
+                if (udp_probe_classify(port, changed, length, 0x1234) != PROTO_NONE) return 1;
                 for (n = 0; n < sizeof(offsets) / sizeof(*offsets); n++) {
                     memcpy(changed, reply, length); changed[offsets[n]] = '!';
                     if (udp_probe_classify(port, changed, length, 0x1234) != PROTO_NONE) return 1;
