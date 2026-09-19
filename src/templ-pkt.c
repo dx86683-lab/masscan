@@ -213,7 +213,7 @@ tcp_checksum2(const unsigned char *px, unsigned offset_ip,
               unsigned offset_tcp, size_t tcp_length)
 {
     uint64_t xsum = 0;
-    unsigned i;
+    size_t i;
 
     /* pseudo checksum */
     xsum = 6;
@@ -224,11 +224,13 @@ tcp_checksum2(const unsigned char *px, unsigned offset_ip,
     xsum += px[offset_ip + 18] << 8 | px[offset_ip + 19];
 
     /* TCP checksum */
-    for (i=0; i<tcp_length; i += 2) {
+    for (i=0; i<(tcp_length & ~(size_t)1); i += 2) {
         xsum += px[offset_tcp + i]<<8 | px[offset_tcp + i + 1];
     }
 
-    xsum -= (tcp_length & 1) * px[offset_tcp + i - 1]; /* yea I know going off end of packet is bad so sue me */
+    /* RFC 1071 pads a trailing octet with a zero low byte. */
+    if (i < tcp_length)
+        xsum += px[offset_tcp + i]<<8;
     xsum = (xsum & 0xFFFF) + (xsum >> 16);
     xsum = (xsum & 0xFFFF) + (xsum >> 16);
     xsum = (xsum & 0xFFFF) + (xsum >> 16);
@@ -280,7 +282,7 @@ udp_checksum2(const unsigned char *px, unsigned offset_ip,
               unsigned offset_tcp, size_t tcp_length)
 {
     uint64_t xsum = 0;
-    unsigned i;
+    size_t i;
 
     /* pseudo checksum */
     xsum = 17;
@@ -290,12 +292,13 @@ udp_checksum2(const unsigned char *px, unsigned offset_ip,
     xsum += px[offset_ip + 16] << 8 | px[offset_ip + 17];
     xsum += px[offset_ip + 18] << 8 | px[offset_ip + 19];
 
-    /* TCP checksum */
-    for (i=0; i<tcp_length; i += 2) {
+    /* UDP checksum */
+    for (i=0; i<(tcp_length & ~(size_t)1); i += 2) {
         xsum += px[offset_tcp + i]<<8 | px[offset_tcp + i + 1];
     }
 
-    xsum -= (tcp_length & 1) * px[offset_tcp + i - 1]; /* yea I know going off end of packet is bad so sue me */
+    if (i < tcp_length)
+        xsum += px[offset_tcp + i]<<8;
     xsum = (xsum & 0xFFFF) + (xsum >> 16);
     xsum = (xsum & 0xFFFF) + (xsum >> 16);
     xsum = (xsum & 0xFFFF) + (xsum >> 16);
@@ -322,13 +325,14 @@ icmp_checksum2(const unsigned char *px,
               unsigned offset_icmp, size_t icmp_length)
 {
     uint64_t xsum = 0;
-    unsigned i;
+    size_t i;
 
-    for (i=0; i<icmp_length; i += 2) {
+    for (i=0; i<(icmp_length & ~(size_t)1); i += 2) {
         xsum += px[offset_icmp + i]<<8 | px[offset_icmp + i + 1];
     }
 
-    xsum -= (icmp_length & 1) * px[offset_icmp + i - 1]; /* yea I know going off end of packet is bad so sue me */
+    if (i < icmp_length)
+        xsum += px[offset_icmp + i]<<8;
     xsum = (xsum & 0xFFFF) + (xsum >> 16);
     xsum = (xsum & 0xFFFF) + (xsum >> 16);
     xsum = (xsum & 0xFFFF) + (xsum >> 16);
@@ -1554,6 +1558,58 @@ template_set_vlan(struct TemplateSet *tmplset, unsigned vlan)
 
 /***************************************************************************
  ***************************************************************************/
+static int
+template_checksum_selftest(void)
+{
+    static const struct {
+        unsigned char payload[8];
+        unsigned length;
+        unsigned tcp_sum;
+        unsigned udp_sum;
+        unsigned icmp_sum;
+    } cases[] = {
+        {{0xff}, 1, 0xeb3f, 0xeb4a, 0xff00},
+        {{0x00, 0x01, 0xf2, 0x03, 0xf4, 0xf5, 0xf6},
+         7, 0xc940, 0xc94b, 0xdcfb},
+        {{0x00, 0x01, 0xf2, 0x03, 0xf4, 0xf5, 0xf6, 0xf7},
+         8, 0xca38, 0xca43, 0xddf2},
+        {{0xff, 0xff}, 2, 0xec3f, 0xec4a, 0xffff},
+        {{0}, 0, 0xec3d, 0xec48, 0}
+    };
+    unsigned i;
+    int failures = 0;
+
+    /* RFC 1071 partial sums; the helpers do not complement the result. */
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        size_t packet_length = 21 + cases[i].length;
+        unsigned char *packet = malloc(packet_length);
+        unsigned tcp_sum;
+        unsigned udp_sum;
+        unsigned icmp_sum;
+
+        if (packet == NULL)
+            return 1;
+        memset(packet, 0, packet_length);
+        /* IPv4 addresses 192.0.2.1 and 198.51.100.2, at IP offset 1. */
+        memcpy(packet + 13, "\xc0\x00\x02\x01\xc6\x33\x64\x02", 8);
+        memcpy(packet + 21, cases[i].payload, cases[i].length);
+
+        /* No spare byte is allocated after the checksummed data. */
+        tcp_sum = tcp_checksum2(packet, 1, 21, cases[i].length);
+        udp_sum = udp_checksum2(packet, 1, 21, cases[i].length);
+        icmp_sum = icmp_checksum2(packet, 21, cases[i].length);
+        free(packet);
+        if (tcp_sum != cases[i].tcp_sum || udp_sum != cases[i].udp_sum ||
+            icmp_sum != cases[i].icmp_sum) {
+            fprintf(stderr, "template checksum case %u failed\n", i);
+            failures++;
+        }
+    }
+    return failures;
+}
+
+/***************************************************************************
+ ***************************************************************************/
 int
 template_selftest(void)
 {
@@ -1562,6 +1618,8 @@ template_selftest(void)
     struct TemplateOptions templ_opts = {{0}};
     unsigned char packet[2048];
     size_t packet_length;
+
+    failures += template_checksum_selftest();
 
     /* Test the module that edits TCP headers */
     if (templ_tcp_selftest()) {
