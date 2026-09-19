@@ -140,11 +140,19 @@ clean:
 	rm -f tmp/*.o
 	rm -f tmp/extended/*.o
 	rm -f bin/masscan
+	rm -f bin/receive-recording-test
 
 regress: bin/masscan
 	bin/masscan --selftest
 
 test: regress
+
+bin/receive-recording-test: tests/receive-recording.c src/main.c $(OBJ) FORCE
+	$(CC) $(CFLAGS) -o $@ tests/receive-recording.c $(filter-out $(OBJDIR)/main.o,$(OBJ)) $(LDFLAGS) $(LIBS)
+
+test-receive: bin/receive-recording-test
+	@receive_test_dir=$$(mktemp -d) || exit 1; trap 'rm -rf "$$receive_test_dir"' EXIT; \
+	bin/receive-recording-test "$$receive_test_dir/received.pcap" "$$receive_test_dir/trace.txt"
 
 install: bin/masscan
 	install $(INSTALL_DATA) bin/masscan $(DESTDIR)$(BINDIR)/masscan

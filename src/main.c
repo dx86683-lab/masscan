@@ -1013,19 +1013,16 @@ receive_thread(void *v)
                 continue;
             case FOUND_SCTP:
                 handle_sctp(out, secs, px, length, cookie, &parsed, entropy);
-                continue;
+                break;
             case FOUND_OPROTO: /* other IP proto */
                 handle_oproto(out, secs, px, length, &parsed, entropy);
-                continue;
+                break;
             case FOUND_TCP:
                 /* fall down to below */
                 break;
             default:
                 continue;
         }
-
-        if (!receive_tcp_fields(px, length, &parsed, &seqno_them, &seqno_me))
-            continue;
 
         /* verify: my port number */
         if (!is_my_port(stack->src, port_me))
@@ -1045,6 +1042,10 @@ receive_thread(void *v)
                 secs,
                 usecs);
         }
+
+        /* Preserve packet recording before entering TCP-only processing. */
+        if (!receive_tcp_fields(px, length, &parsed, &seqno_them, &seqno_me))
+            continue;
 
         {
             char buf[64];
