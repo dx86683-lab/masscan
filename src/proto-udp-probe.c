@@ -1487,8 +1487,10 @@ udp_probe_catalog_selftest(void)
     {
         static const unsigned char padded[] = "NRLAB___AHM_3___";
         static const unsigned char plain[] = "NRLABAHM_3___";
+        static const unsigned char unnamed[] = "NRAHM_3___";
+        static const unsigned char unnamed_padded[] = "NR______AHM_3___";
         static const char *invalid[] = {
-            "NRAHM_3___", "NQLAB___AHM_3___", "nrLAB___AHM_3___",
+            "NQLAB___AHM_3___", "nrLAB___AHM_3___",
             "NRLA_B___AHM_3___", "NRLAB___AHM_4___", "NRLA\nB___AHM_3___"
         };
         unsigned n;
@@ -1496,10 +1498,21 @@ udp_probe_catalog_selftest(void)
             udp_probe_classify(5632, plain, sizeof(plain), cookie) != PROTO_PCANYWHERE) {
             fprintf(stderr, "pcanywhere: complete reply rejected\n"); return 1;
         }
+        if (udp_probe_classify(5632, unnamed, sizeof(unnamed), cookie) != PROTO_PCANYWHERE ||
+            udp_probe_classify(5632, unnamed_padded, sizeof(unnamed_padded), cookie) != PROTO_PCANYWHERE) {
+            fprintf(stderr, "pcanywhere: complete unnamed reply rejected\n"); return 1;
+        }
+        /* Name responses have no request transaction field. */
+        if (udp_probe_classify(5632, unnamed, sizeof(unnamed), cookie ^ 1) != PROTO_PCANYWHERE)
+            return 1;
         if (!udp_probe_prepare(5632, cookie, NULL, &result) || result.length != 2 ||
             memcmp(result.payload, "NQ", 2)) return 1;
         for (n = 0; n < sizeof(padded); n++)
             if (udp_probe_classify(5632, padded, n, cookie) != PROTO_NONE) return 1;
+        for (n = 0; n < sizeof(unnamed); n++)
+            if (udp_probe_classify(5632, unnamed, n, cookie) != PROTO_NONE) return 1;
+        if (udp_probe_classify(5632, (const unsigned char *)"NR______", 9, cookie) != PROTO_NONE)
+            return 1;
         for (n = 0; n < sizeof(invalid) / sizeof(*invalid); n++)
             if (udp_probe_classify(5632, (const unsigned char *)invalid[n],
                     (unsigned)strlen(invalid[n]) + 1, cookie) != PROTO_NONE) return 1;
