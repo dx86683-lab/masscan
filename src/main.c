@@ -30,6 +30,7 @@
 #include "main-readrange.h"
 #include "crypto-siphash24.h"   /* hash function, for hash tables */
 #include "crypto-blackrock.h"   /* the BlackRock shuffling func */
+#include "crypto-primegen.h"
 #include "crypto-lcg.h"         /* the LCG randomization func */
 #include "crypto-base64.h"      /* base64 encode/decode */
 #include "templ-pkt.h"          /* packet template, that we use to send */
@@ -1862,6 +1863,7 @@ int main(int argc, char *argv[])
             x += udp_probe_catalog_selftest();
             x += templ_payloads_selftest();
             x += blackrock_selftest();
+            x += primegen_selftest();
             x += rawsock_selftest();
             x += lcg_selftest();
             x += template_selftest();

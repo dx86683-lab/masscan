@@ -4,6 +4,7 @@
     getting rid of warnings.
 */
 #include "crypto-primegen.h"
+#include <stdio.h>
 
 /*
 B is 32 times X.
@@ -173,6 +174,7 @@ static void doit12(register uint32_t *a,register long x,register long y,int64_t 
   }
 }
 
+/* Each valid residue stores its row offset in units of uint32_t words. */
 static const int deltainverse[60] = {
  -1,B32 * 0,-1,-1,-1,-1,-1,B32 * 1,-1,-1,-1,B32 * 2,-1,B32 * 3,-1
 ,-1,-1,B32 * 4,-1,B32 * 5,-1,-1,-1,B32 * 6,-1,-1,-1,-1,-1,B32 * 7
@@ -199,7 +201,7 @@ static void squarefree1big(uint32_t (*buf)[B32],uint64_t base,uint32_t q,uint64_
       n = deltainverse[pos % 60];
       if (n >= 0) {
         pos /= 60;
-        (*buf)[n + (pos >> 5)] |= two[pos & 31];
+        buf[n / B32][pos >> 5] |= two[pos & 31];
       }
     }
 
@@ -236,7 +238,7 @@ static void squarefree1(register uint32_t (*buf)[B32],uint64_t L,uint32_t q)
       while (ihigh < B) {
         n = deltainverse[ilow];
         if (n >= 0)
-          (*buf)[n + (ihigh >> 5)] |= two[ihigh & 31];
+          buf[n / B32][ihigh >> 5] |= two[ihigh & 31];
 
         ilow += 2; ihigh += qqhigh;
         if (ilow >= 60) { ilow -= 60; ihigh += 1; }
@@ -268,7 +270,7 @@ static void squarefree49big(uint32_t (*buf)[B32],uint64_t base,uint32_t q,uint64
       n = deltainverse[pos % 60];
       if (n >= 0) {
         pos /= 60;
-        (*buf)[n + (pos >> 5)] |= two[pos & 31];
+        buf[n / B32][pos >> 5] |= two[pos & 31];
       }
     }
 
@@ -305,7 +307,7 @@ static void squarefree49(register uint32_t (*buf)[B32],uint64_t L,uint32_t q)
       while (ihigh < B) {
         n = deltainverse[ilow];
         if (n >= 0)
-          (*buf)[n + (ihigh >> 5)] |= two[ihigh & 31];
+          buf[n / B32][ihigh >> 5] |= two[ihigh & 31];
 
         ilow += 38; ihigh += qqhigh;
         if (ilow >= 60) { ilow -= 60; ihigh += 1; }
@@ -713,4 +715,45 @@ void primegen_skipto(primegen *pg,uint64_t to)
 
     primegen_fill(pg);
   }
+}
+
+int
+primegen_selftest(void)
+{
+    static const struct {
+        uint64_t start;
+        uint64_t expected[12];
+    } cases[] = {
+        {0, {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37}},
+        {60, {61, 67, 71, 73, 79, 83, 89, 97, 101, 103, 107, 109}},
+        /* Cross the first sieve block boundary at 7687740. */
+        {7687700, {7687711, 7687717, 7687733, 7687739, 7687741, 7687763,
+                   7687777, 7687793, 7687811, 7687829, 7687831, 7687847}},
+        /* Exercise square removal with a base above 2000000000. */
+        {2008000000, {2008000021, 2008000031, 2008000037, 2008000069,
+                      2008000081, 2008000087, 2008000153, 2008000177,
+                      2008000187, 2008000213, 2008000219, 2008000243}}
+    };
+    primegen pg;
+    unsigned i;
+    unsigned j;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        primegen_init(&pg);
+        primegen_skipto(&pg, cases[i].start);
+        for (j = 0; j < sizeof(cases[i].expected) / sizeof(cases[i].expected[0]); j++) {
+            if (primegen_peek(&pg) != cases[i].expected[j] ||
+                primegen_next(&pg) != cases[i].expected[j]) {
+                fprintf(stderr, "primegen: sequence case %u item %u failed\n", i, j);
+                return 1;
+            }
+        }
+    }
+
+    primegen_init(&pg);
+    if (primegen_count(&pg, 10000000) != 664579) {
+        fprintf(stderr, "primegen: count below 10000000 failed\n");
+        return 1;
+    }
+    return 0;
 }
