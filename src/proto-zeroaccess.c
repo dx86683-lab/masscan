@@ -203,7 +203,7 @@ handle_zeroaccess(  struct Output *out, time_t timestamp,
         unsigned old_crc;
         unsigned new_crc;
 
-        old_crc = buf[0] | buf[1]<<8 | buf[2]<<16 | buf[3]<<24;
+        old_crc = buf[0] | buf[1]<<8 | buf[2]<<16 | (uint32_t)buf[3]<<24;
         memset(buf, 0, 4);
         new_crc = crc_calc(buf, len);
         if (old_crc != new_crc)
@@ -219,7 +219,7 @@ handle_zeroaccess(  struct Output *out, time_t timestamp,
 
     {
         unsigned i;
-        unsigned ip_count = buf[12] | buf[13]<<8 | buf[14]<<16 | buf[15]<<24;
+        unsigned ip_count = buf[12] | buf[13]<<8 | buf[14]<<16 | (uint32_t)buf[15]<<24;
         if (ip_count > 256)
             return 0; /* too many addresses */
         if (16 + ip_count*8 > len)
@@ -228,7 +228,7 @@ handle_zeroaccess(  struct Output *out, time_t timestamp,
             unsigned ip_found;
             char szaddr[20];
 
-            ip_found =  buf[16 + i*8 + 0] <<24
+            ip_found =  (uint32_t)buf[16 + i*8 + 0] <<24
                       | buf[16 + i*8 + 1] <<16
                       | buf[16 + i*8 + 2] << 8
                       | buf[16 + i*8 + 3] << 0;
@@ -260,11 +260,19 @@ handle_zeroaccess(  struct Output *out, time_t timestamp,
 
 /***************************************************************************
  ***************************************************************************/
-static const unsigned char sample[] = {
-    0xda, 0xbe, 0x6e, 0xce,
-    0x28, 0x94, 0x8d, 0xab,
-    0xc9, 0xc0, 0xd1, 0x99,
-    0xec, 0xd6, 0xa9, 0x3c
+static const struct {
+    unsigned char encrypted[16];
+    unsigned xrand;
+    unsigned crc;
+} samples[] = {
+    {{0x39, 0xee, 0x29, 0x19, 0x28, 0x94, 0x8d, 0xab,
+      0xc9, 0xc0, 0xd1, 0x99, 0x93, 0x81, 0xa3, 0x3d}, 0x0e, 0x7f5d9e0bU},
+    {{0x49, 0x84, 0x26, 0xe6, 0x28, 0x94, 0x8d, 0xab,
+      0xc9, 0xc0, 0xd1, 0x99, 0x93, 0x81, 0xa3, 0xe4}, 0xd7, 0x8052f47bU},
+    {{0xf2, 0x89, 0x4c, 0x99, 0x28, 0x94, 0x8d, 0xab,
+      0xc9, 0xc0, 0xd1, 0x99, 0x93, 0x81, 0xa3, 0xa8}, 0x9b, 0xff38f9c0U},
+    {{0xda, 0xbe, 0x6e, 0xce, 0x28, 0x94, 0x8d, 0xab,
+      0xc9, 0xc0, 0xd1, 0x99, 0xec, 0xd6, 0xa9, 0x3c}, 0x7f570a0f, 0xa81acee8U}
 };
 
 
@@ -276,22 +284,30 @@ zeroaccess_selftest(void)
     unsigned char buf[128];
     unsigned old_crc;
     unsigned new_crc;
+    size_t i;
 
-    zadecrypt(sample, sizeof(sample), buf, sizeof(buf));
+    /* Check CRC words below and above the signed 32-bit boundary. */
+    for (i=0; i<sizeof(samples)/sizeof(samples[0]); i++) {
+        const unsigned char *sample = samples[i].encrypted;
+        size_t sample_length = sizeof(samples[i].encrypted);
 
-    old_crc = buf[0] | buf[1]<<8 | buf[2]<<16 | buf[3]<<24;
+        zadecrypt(sample, sample_length, buf, sizeof(buf));
 
+        old_crc = buf[0] | buf[1]<<8 | buf[2]<<16 | (uint32_t)buf[3]<<24;
+        if (old_crc != samples[i].crc)
+            return 1;
 
-    memset(buf, 0, 4);
+        memset(buf, 0, 4);
 
-    new_crc = crc_calc(buf, sizeof(sample));
+        new_crc = crc_calc(buf, (unsigned)sample_length);
 
-    generate_getL(buf, sizeof(buf), 0x7f570a0f);
+        generate_getL(buf, sizeof(buf), samples[i].xrand);
 
-    if (memcmp(buf, sample, 16) != 0)
-        return 1; /*fail*/
-    if (old_crc != new_crc)
-        return 1; /*fail*/
+        if (memcmp(buf, sample, sample_length) != 0)
+            return 1; /*fail*/
+        if (old_crc != new_crc)
+            return 1; /*fail*/
+    }
 
     /*generate_getL(buf, sizeof(buf), *(unsigned*)"mass");
     {
@@ -302,5 +318,3 @@ zeroaccess_selftest(void)
 
     return 0; /*success*/
 }
-
-
