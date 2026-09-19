@@ -6,6 +6,8 @@
 #include "masscan-status.h"
 #include "massip-port.h"
 #include "main-dedup.h"
+#include "masscan.h"
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -103,6 +105,52 @@ icmp_selftest(void)
         }
         parsed.transport_offset = sizeof(blob) + 1;
         handle_icmp(NULL, 0, blob, sizeof(blob), &parsed, 0);
+    }
+    {
+        unsigned char echo[11] = {0};
+        struct PreprocessedInfo parsed;
+        struct Output out;
+        uint64_t entropy;
+        unsigned cookie = 0;
+        int failed;
+
+        memset(&parsed, 0, sizeof(parsed));
+        memset(&out, 0, sizeof(out));
+        parsed.src_ip.version = parsed.dst_ip.version = 4;
+        parsed.src_ip.ipv4 = 0xc0000201U;
+        parsed.dst_ip.ipv4 = 0xc6336402U;
+        parsed.transport_offset = 3;
+        /* Select a high-bit cookie without depending on host byte order. */
+        for (entropy = 0; entropy < 256; entropy++) {
+            cookie = (unsigned)syn_cookie(parsed.src_ip, Templ_ICMP_echo,
+                                          parsed.dst_ip, 0, entropy);
+            if (cookie & 0x80000000U)
+                break;
+        }
+        if (entropy == 256)
+            return 1;
+        echo[7] = (unsigned char)(cookie >> 24);
+        echo[8] = (unsigned char)(cookie >> 16);
+        echo[9] = (unsigned char)(cookie >> 8);
+        echo[10] = (unsigned char)cookie;
+        out.fp = tmpfile();
+        if (out.fp == NULL)
+            return 1;
+        out.funcs = &null_output;
+        out.format = Output_None;
+        out.is_show_open = 1;
+        out.rotate.next = LONG_MAX;
+
+        /* A wrong cookie must not consume the valid response's dedup entry. */
+        echo[10] ^= 1;
+        handle_icmp(&out, 0, echo, sizeof(echo), &parsed, entropy);
+        failed = out.counts.icmp.echo != 0;
+        echo[10] ^= 1;
+        handle_icmp(&out, 0, echo, sizeof(echo), &parsed, entropy);
+        failed |= out.counts.icmp.echo != 1;
+        fclose(out.fp);
+        if (failed)
+            return 1;
     }
     {
         unsigned char options[sizeof(blob) + 4] = {0};
