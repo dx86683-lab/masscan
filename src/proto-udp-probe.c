@@ -134,6 +134,9 @@ quic_classify(const unsigned char *response, unsigned response_length,
         if (response[i] == 0 && response[i + 1] == 0 &&
             response[i + 2] == 0 && response[i + 3] == 0)
             return 0;
+        /* RFC 9000 section 6.2 excludes the version offered by the client. */
+        if (read_u32_be(response + i) == UINT32_C(0x0a0a0a0a))
+            return 0;
     }
     return 1;
 }
@@ -3441,6 +3444,18 @@ udp_probe_catalog_selftest(void)
     memset(invalid + 23, 0, 4);
     if (udp_probe_classify(80, invalid, sizeof(invalid), cookie) != PROTO_NONE)
         return 1;
+    for (i = 23; i < sizeof(invalid); i += 4) {
+        memcpy(invalid, version_negotiation, sizeof(invalid));
+        memset(invalid + i, 0x0a, 4);
+        if (udp_probe_classify(2491, invalid, sizeof(invalid), cookie) != PROTO_NONE) {
+            fprintf(stderr, "quic: negotiated list containing offered version accepted\n");
+            return 1;
+        }
+        /* Other reserved versions are allowed in a negotiation list. */
+        invalid[i] = 0x1a;
+        if (udp_probe_classify(2491, invalid, sizeof(invalid), cookie) != PROTO_QUIC)
+            return 1;
+    }
 
     if (udp_probe_prepare(6969, cookie, NULL, &result) == 0)
         return 1;
