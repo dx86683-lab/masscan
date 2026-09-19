@@ -2896,6 +2896,8 @@ udp_probe_catalog_selftest(void)
             unsigned p;
             unsigned char altered[104];
             for (p = 0; p < sizeof(ports) / sizeof(ports[0]); p++) {
+                static const unsigned char flags[] = {0x00, 0x04, 0x80, 0xfc};
+                unsigned f, security;
                 if (!udp_probe_prepare(ports[p], cookie, NULL, &result) ||
                     result.length != sizeof(request) - 1 ||
                     memcmp(result.payload, request, sizeof(request) - 1)) return 1;
@@ -2904,6 +2906,25 @@ udp_probe_catalog_selftest(void)
                     udp_probe_classify(ports[p], reply, sizeof(reply), cookie) != PROTO_NONE) return 1;
                 for (i = 0; i < sizeof(reply) - 1; i++)
                     if (udp_probe_classify(ports[p], reply, i, cookie) != PROTO_NONE) return 1;
+                for (f = 0; f < sizeof(flags) / sizeof(flags[0]); f++) {
+                    memcpy(altered, reply, sizeof(reply) - 1);
+                    altered[19] = flags[f];
+                    if (udp_probe_classify(ports[p], altered, sizeof(reply) - 1, cookie) != PROTO_SNMP) {
+                        fprintf(stderr, "snmpv3: Report flags 0x%02x rejected on port %u\n",
+                                flags[f], ports[p]);
+                        return 1;
+                    }
+                    if (udp_probe_classify(ports[p], altered, sizeof(reply) - 1, cookie ^ 1) != PROTO_NONE)
+                        return 1;
+                    for (security = 1; security <= 3; security++) {
+                        altered[19] = (unsigned char)(flags[f] | security);
+                        if (udp_probe_classify(ports[p], altered, sizeof(reply) - 1, cookie) != PROTO_NONE) {
+                            fprintf(stderr, "snmpv3: unsupported security flags 0x%02x accepted\n",
+                                    altered[19]);
+                            return 1;
+                        }
+                    }
+                }
             }
             {
                 static const unsigned offsets[] = {0, 4, 19, 22, 28, 54, 65, 72, 75, 78, 94, 95, 96};

@@ -92,9 +92,10 @@ snmpv3_probe_classify(const unsigned char *response, unsigned length, uint64_t c
     if (!ber_take(&packet, 0x30, &root) || packet.length ||
         !ber_uint(&root, 2, 3, &number) || number != 3 ||
         !ber_take(&root, 0x30, &global)) return 0;
+    /* RFC 3412 section 6.4: ignore reportable/reserved bits in Report PDUs. */
     if (!ber_uint(&global, 2, 0x7fffffff, &number) || number != id ||
         !ber_uint(&global, 2, 0x7fffffff, &number) || number < 484 ||
-        !ber_take(&global, 4, &value) || value.length != 1 || value.data[0] != 0 ||
+        !ber_take(&global, 4, &value) || value.length != 1 || (value.data[0] & 3) != 0 ||
         !ber_uint(&global, 2, 3, &number) || number != 3 || global.length) return 0;
     if (!ber_take(&root, 4, &security) || !ber_take(&security, 0x30, &parameters) ||
         security.length || !ber_take(&parameters, 4, &engine) ||
