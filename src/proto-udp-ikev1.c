@@ -79,9 +79,19 @@ ikev1_probe_classify(const unsigned char *data, unsigned length, uint64_t cookie
     unsigned char random[32];
     unsigned offset = 32, next, saw_sa = 0, i, nonzero = 0;
     if (length < 32 || length > 4096 || ikev1_u32(data) ||
-        data[20] != 1 || data[21] != 0x10 || data[22] != 2 || (data[23] & 7) ||
-        ikev1_u32(data + 24) || ikev1_u32(data + 28) != length - 4 ||
+        data[21] != 0x10 || (data[23] & 7) || ikev1_u32(data + 28) != length - 4 ||
         !udp_probe_derive("ikev1-cookie", cookie, random) || memcmp(data + 4, random, 8)) return 0;
+    if (data[22] == 5) {
+        /* RFC2408 3.14, 4.8, 5.4: a correlated early rejection is an
+         * unprotected Informational exchange with an independent MID.
+         * The header cookie pair identifies the negotiation; a Notify's
+         * ISAKMP SPI (0-16 octets) is ignored.  No SA is established. */
+        return length >= 44 && data[20] == 11 && !data[32] &&
+            ikev1_u16(data + 34) == length - 32 && ikev1_u32(data + 36) <= 1 &&
+            data[40] == 1 && data[41] <= 16 && length == 44u + data[41] &&
+            ikev1_u16(data + 42) == 14;
+    }
+    if (data[20] != 1 || data[22] != 2 || ikev1_u32(data + 24)) return 0;
     for (i = 12; i < 20; i++) nonzero |= data[i];
     if (!nonzero) return 0;
     next = data[20];
