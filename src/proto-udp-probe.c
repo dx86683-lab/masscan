@@ -27,6 +27,7 @@
 #include "proto-udp-structured-discovery.h"
 #include "proto-udp-ventrilo.h"
 #include "proto-udp-ecom.h"
+#include "proto-udp-citrix.h"
 #include "proto-udp-text-discovery.h"
 #include "proto-udp-fins.h"
 #include "proto-udp-dahua.h"
@@ -900,6 +901,7 @@ static const struct UdpProbeSpec udp_probe_catalog[] = {
     {9600, PROTO_FINS, fins_probe_prepare, fins_probe_classify},
     {8888, PROTO_ANDROMOUSE, andromouse_probe_prepare, andromouse_probe_classify},
     {28784, PROTO_ECOM, ecom_probe_prepare, ecom_probe_classify},
+    {1604, PROTO_CITRIX, citrix_probe_prepare, citrix_probe_classify},
 #ifdef UDP_EXTENDED_PROBES
     {37020, PROTO_HIKVISION, hikvision_probe_prepare, hikvision_probe_classify},
     {37810, PROTO_DAHUA, dahua_probe_prepare, dahua_probe_classify},
@@ -1064,7 +1066,18 @@ udp_probe_catalog_selftest(void)
 {
     struct UdpPreparedProbe result;
     static const uint64_t cookie = UINT64_C(0x0000000089abcdef);
-    if (ecom_selftest()) return 1;
+    {
+        unsigned char reply[44] = {44, 0, 4, 0x33, 2, 0xfd, 0xa8, 0xe3};
+        memcpy(reply + 40, "App", 4);
+        if (masscan_string_to_app("citrix") != PROTO_CITRIX ||
+            !udp_probe_is_registered(1604) ||
+            !udp_probe_prepare(1604, cookie, NULL, &result) || result.length != 42 ||
+            strcmp(masscan_app_to_string(udp_probe_classify(1604, reply,
+                sizeof(reply), cookie)), "citrix") != 0) {
+            fprintf(stderr, "citrix: catalog list datagram failed\n"); return 1;
+        }
+    }
+    if (ecom_selftest() || citrix_selftest()) return 1;
     {
         static const unsigned char reply[] =
             "\x48\x41\x50\x01\x00\x40\x73\x0f\x00\x55\xaa\x00"

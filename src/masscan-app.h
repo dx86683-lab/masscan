@@ -101,6 +101,7 @@ enum ApplicationProtocol {
     PROTO_DAHUA,
     PROTO_ANDROMOUSE,
     PROTO_ECOM,
+    PROTO_CITRIX,
 
     PROTO_end_of_list /* must be last one */
 };

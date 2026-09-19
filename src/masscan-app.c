@@ -103,6 +103,7 @@ masscan_app_to_string(enum ApplicationProtocol proto)
     case PROTO_DAHUA:            return "dahua";
     case PROTO_ANDROMOUSE:       return "andromouse";
     case PROTO_ECOM:             return "ecom";
+    case PROTO_CITRIX:           return "citrix";
         
     case PROTO_ERROR:           return "error";
             
@@ -212,6 +213,7 @@ masscan_string_to_app(const char *str)
         {"dahua",       PROTO_DAHUA},
         {"andromouse",  PROTO_ANDROMOUSE},
         {"ecom",       PROTO_ECOM},
+        {"citrix",     PROTO_CITRIX},
         {0,0}
     };
     size_t i;
@@ -289,6 +291,7 @@ masscan_app_selftest(void) {
         {PROTO_DAHUA, 90},
         {PROTO_ANDROMOUSE, 91},
         {PROTO_ECOM, 92},
+        {PROTO_CITRIX, 93},
         {0,0}
     };
     size_t i;

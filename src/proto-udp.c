@@ -132,7 +132,7 @@ handle_udp(struct Output *out, time_t timestamp,
             probe_protocol == PROTO_VENTRILO || probe_protocol == PROTO_SERIALNUMBERD ||
             probe_protocol == PROTO_HIKVISION || probe_protocol == PROTO_FINS ||
             probe_protocol == PROTO_DAHUA || probe_protocol == PROTO_ANDROMOUSE ||
-            probe_protocol == PROTO_ECOM) {
+            probe_protocol == PROTO_ECOM || probe_protocol == PROTO_CITRIX) {
             banner_data = (const unsigned char *)"discovery-response";
             banner_length = 18;
         }
@@ -510,6 +510,10 @@ proto_udp_selftest(void)
                 "\xd9\xc1\xb7\xd8\x1e\x69\x5b\x81\xa5\xa1\xbf\x12\xe0\x98\x7a\xcb\x39\xad\x7b\x98\xb0\x66\x23\x9b\x8e"},
             {626, sizeof(serial_reply), PROTO_SERIALNUMBERD, serial_reply},
             {8888, 7, PROTO_ANDROMOUSE, "GOTBACK"},
+            {1604, 44, PROTO_CITRIX,
+                "\x2c\x00\x04\x33\x02\xfd\xa8\xe3\x00\x00\x00\x00\x00\x00\x00\x00"
+                "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+                "\x00\x00\x00\x00\x00\x00\x00\x00\x41\x70\x70\x00"},
             {28784, 24, PROTO_ECOM,
                 "\x48\x41\x50\x01\x00\x40\x73\x0f\x00\x55\xaa\x00"
                 "\xe0\x62\x20\xa1\x32\x00\x01\xc0\xa8\x01\x28\x00"},
