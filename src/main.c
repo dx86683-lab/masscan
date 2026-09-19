@@ -524,6 +524,97 @@ is_ipv6_multicast(ipaddress ip_me)
     return ip_me.version == 6 && (ip_me.ipv6.hi>>48ULL) == 0xFF02;
 }
 
+static int
+receive_tcp_fields(const unsigned char *px, unsigned length,
+                   const struct PreprocessedInfo *parsed,
+                   unsigned *seqno_them, unsigned *seqno_me)
+{
+    struct ebuf_t fields;
+
+    if (parsed->found != FOUND_TCP || parsed->transport_offset > length ||
+        length - parsed->transport_offset < 20)
+        return 0;
+
+    fields.buf = px;
+    fields.offset = parsed->transport_offset + 4;
+    fields.max = length;
+    *seqno_them = e_next_int32(&fields, EBUF_BE);
+    *seqno_me = e_next_int32(&fields, EBUF_BE);
+    return 1;
+}
+
+static int
+receive_tcp_fields_selftest(void)
+{
+    static const struct {
+        unsigned protocol;
+        unsigned transport_length;
+        unsigned parsed;
+        unsigned tcp;
+    } cases[] = {
+        {1, 4, 1, 0},
+        {1, 7, 1, 0},
+        {1, 8, 1, 0},
+        {17, 8, 1, 0},
+        {132, 12, 1, 0},
+        {6, 19, 0, 0},
+        {6, 20, 1, 1},
+        {6, 24, 1, 1}
+    };
+    unsigned i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        unsigned length = 14 + 20 + cases[i].transport_length;
+        unsigned char *px = calloc(length, 1);
+        struct PreprocessedInfo parsed = {0};
+        unsigned seqno_them = 0x13579bdfU, seqno_me = 0x2468ace0U;
+        unsigned accepted;
+        int failed = 0;
+
+        if (px == NULL)
+            return 1;
+        px[12] = 8;
+        px[14] = 0x45;
+        px[17] = (unsigned char)(20 + cases[i].transport_length);
+        px[22] = 64;
+        px[23] = (unsigned char)cases[i].protocol;
+        px[26] = 10;
+        px[29] = 1;
+        px[30] = 10;
+        px[33] = 2;
+        if (cases[i].protocol == 6) {
+            static const unsigned char fields[] = {
+                0x81, 0x23, 0x45, 0x67, 0xfe, 0xdc, 0xba, 0x98
+            };
+            memcpy(px + 38, fields, sizeof(fields));
+            px[46] = (unsigned char)(cases[i].transport_length == 24 ? 0x60 : 0x50);
+        }
+
+        accepted = preprocess_frame(px, length, 1, &parsed);
+        failed = accepted != cases[i].parsed;
+        if (accepted) {
+            int tcp = receive_tcp_fields(px, length, &parsed, &seqno_them, &seqno_me);
+            failed |= tcp != (int)cases[i].tcp;
+            if (tcp)
+                failed |= seqno_them != 0x81234567U || seqno_me != 0xfedcba98U;
+            else
+                failed |= seqno_them != 0x13579bdfU || seqno_me != 0x2468ace0U;
+            if (cases[i].tcp) {
+                parsed.transport_offset = length + 1;
+                failed |= receive_tcp_fields(px, length, &parsed, &seqno_them, &seqno_me);
+                parsed.transport_offset = length - 19;
+                failed |= receive_tcp_fields(px, length, &parsed, &seqno_them, &seqno_me);
+            }
+        }
+        free(px);
+        if (failed) {
+            fprintf(stderr, "receive TCP fields: case %u failed\n", i);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 
 /***************************************************************************
  *
@@ -816,8 +907,6 @@ receive_thread(void *v)
         ip_them = parsed.src_ip;
         port_me = parsed.port_dst;
         port_them = parsed.port_src;
-        seqno_them = TCP_SEQNO(px, parsed.transport_offset);
-        seqno_me = TCP_ACKNO(px, parsed.transport_offset);
         
         assert(ip_me.version != 0);
         assert(ip_them.version != 0);
@@ -924,10 +1013,10 @@ receive_thread(void *v)
                 continue;
             case FOUND_SCTP:
                 handle_sctp(out, secs, px, length, cookie, &parsed, entropy);
-                break;
+                continue;
             case FOUND_OPROTO: /* other IP proto */
                 handle_oproto(out, secs, px, length, &parsed, entropy);
-                break;
+                continue;
             case FOUND_TCP:
                 /* fall down to below */
                 break;
@@ -935,6 +1024,8 @@ receive_thread(void *v)
                 continue;
         }
 
+        if (!receive_tcp_fields(px, length, &parsed, &seqno_them, &seqno_me))
+            continue;
 
         /* verify: my port number */
         if (!is_my_port(stack->src, port_me))
@@ -1877,6 +1968,7 @@ int main(int argc, char *argv[])
             x += rstfilter_selftest();
             x += masscan_app_selftest();
             x += icmp_selftest();
+            x += receive_tcp_fields_selftest();
 
 
             if (x != 0) {
