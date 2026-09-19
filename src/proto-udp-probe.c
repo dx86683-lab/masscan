@@ -1197,8 +1197,23 @@ udp_probe_catalog_selftest(void)
             memcmp(result.payload, "\x80\x00\x02\x00\x01\x00\x00\x02\x00\x7b\x05\x01\x00", 13)) return 1;
         for (n = 0; n < 106; n++)
             if (udp_probe_classify(9600, reply, n, 0x7b) != PROTO_NONE) return 1;
-        for (n = 0; n < 14; n++) {
+        /* W342 section 3-3-3 reserves ICF bits 1-5, RSV and GCT for
+         * the system; a receiver must not use them to reject a reply. */
+        memcpy(changed, reply, 106); changed[2] = 7;
+        if (udp_probe_classify(9600, changed, 106, 0x7b) != PROTO_FINS) {
+            fprintf(stderr, "fins: system gateway count rejected\n"); return 1;
+        }
+        changed[0] |= 0x3e; changed[1] = 0xa5;
+        if (udp_probe_classify(9600, changed, 106, 0x7b) != PROTO_FINS) {
+            fprintf(stderr, "fins: system response bits rejected\n"); return 1;
+        }
+        for (n = 3; n < 14; n++) {
             memcpy(changed, reply, 106); changed[n] ^= 1;
+            if (udp_probe_classify(9600, changed, 106, 0x7b) != PROTO_NONE) return 1;
+        }
+        for (n = 0; n < 8; n++) {
+            if (!(0xc1 & (1u << n))) continue;
+            memcpy(changed, reply, 106); changed[0] ^= (unsigned char)(1u << n);
             if (udp_probe_classify(9600, changed, 106, 0x7b) != PROTO_NONE) return 1;
         }
         if (udp_probe_classify(9600, reply, 107, 0x7b) != PROTO_NONE ||

@@ -39,7 +39,8 @@ int
 fins_probe_classify(const unsigned char *data, unsigned length, uint64_t cookie)
 {
     if (!fins_source || !fins_destination || length != 106 ||
-        memcmp(data, "\xc0\x00\x02\x00", 4) || data[4] != fins_source ||
+        /* W342 3-3-3: ICF bits 1-5, RSV and GCT are system-owned. */
+        (data[0] & 0xc1) != 0xc0 || data[3] || data[4] != fins_source ||
         data[5] || data[6] || data[7] != fins_destination || data[8] ||
         data[9] != (unsigned char)cookie || memcmp(data + 10, "\x05\x01\x00\x00", 4)) return 0;
     return fins_identity(data + 14) && fins_identity(data + 34);
