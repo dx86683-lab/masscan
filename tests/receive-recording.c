@@ -5,8 +5,9 @@
 #undef rawsock_recv_packet
 #undef main
 
-static unsigned char frames[3][54];
-static const unsigned frame_lengths[] = {50, 50, 54};
+static unsigned char *frames[4];
+/* The final SCTP header is too short for TCP flags: keep its allocation exact. */
+static const unsigned frame_lengths[] = {50, 50, 54, 46};
 static unsigned frame_index;
 
 int
@@ -15,13 +16,13 @@ receive_test_packet(struct Adapter *adapter, unsigned *length,
                     const unsigned char **packet)
 {
     (void)adapter;
-    if (frame_index == 3) {
+    if (frame_index == 4) {
         is_rx_done = 1;
         return 1;
     }
     *packet = frames[frame_index];
     *length = frame_lengths[frame_index++];
-    *secs = 1234;
+    *secs = 0x81234567U;
     *usecs = 5678;
     return 0;
 }
@@ -42,8 +43,12 @@ main(int argc, char **argv)
 
     if (argc != 3 || freopen(argv[2], "w", stdout) == NULL)
         return 2;
-    for (i = 0; i < 3; i++) {
-        unsigned char *px = frames[i];
+    for (i = 0; i < 4; i++) {
+        unsigned char *px;
+        frames[i] = calloc(frame_lengths[i], 1);
+        if (frames[i] == NULL)
+            return 2;
+        px = frames[i];
         unsigned port = i == 1 ? 40001 : 40000;
         px[12] = 8;
         px[14] = 0x45;
@@ -60,7 +65,7 @@ main(int argc, char **argv)
         px[37] = (unsigned char)port;
         if (i == 2)
             px[46] = 0x50;
-        else {
+        else if (frame_lengths[i] >= 50) {
             px[46] = 4; /* HEARTBEAT: no status output is expected. */
             px[49] = 4;
         }
@@ -87,14 +92,15 @@ main(int argc, char **argv)
     capture = pcapfile_openread(argv[1]);
     if (capture == NULL)
         return 2;
-    for (i = 0; i < 2; i++) {
-        unsigned expected = i == 0 ? 0 : 2;
+    for (i = 0; i < 3; i++) {
+        static const unsigned expected_frames[] = {0, 2, 3};
+        unsigned expected = expected_frames[i];
         if (!pcapfile_readframe(capture, &secs, &usecs, &original, &length,
                                captured, sizeof(captured)) ||
-            secs != 1234 || usecs != 5678 || original != frame_lengths[expected] ||
+            secs != 0x81234567U || usecs != 5678 || original != frame_lengths[expected] ||
             length != frame_lengths[expected] ||
             memcmp(captured, frames[expected], length) != 0) {
-            fprintf(stderr, "receive recording: expected SCTP then TCP frame\n");
+            fprintf(stderr, "receive recording: expected matching SCTP and TCP frames\n");
             pcapfile_close(capture);
             return 1;
         }
@@ -105,6 +111,10 @@ main(int argc, char **argv)
         pcapfile_close(capture);
         return 1;
     }
+    pcapfile_close(capture);
+    capture = pcapfile_openappend(argv[1], 1);
+    if (capture == NULL)
+        return 2;
     pcapfile_close(capture);
 
     trace = fopen(argv[2], "r");
@@ -118,6 +128,8 @@ main(int argc, char **argv)
         fprintf(stderr, "receive recording: missing protocol trace or unrelated port\n");
         return 1;
     }
+    for (i = 0; i < 4; i++)
+        free(frames[i]);
     fprintf(stderr, "receive recording regression: success!\n");
     return 0;
 }

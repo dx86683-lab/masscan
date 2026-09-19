@@ -177,8 +177,8 @@ static unsigned PCAP16(unsigned byte_order, const unsigned char *buf)
 static unsigned PCAP32(unsigned byte_order, const unsigned char *buf)
 {
     switch (byte_order) {
-    case CAPFILE_BIGENDIAN: return buf[0]<<24 | buf[1]<<16 | buf[2] << 8 | buf[3];
-    case CAPFILE_LITTLEENDIAN: return buf[3]<<24 | buf[2]<<16 | buf[1] << 8 | buf[0];
+    case CAPFILE_BIGENDIAN: return (uint32_t)buf[0]<<24 | buf[1]<<16 | buf[2] << 8 | buf[3];
+    case CAPFILE_LITTLEENDIAN: return (uint32_t)buf[3]<<24 | buf[2]<<16 | buf[1] << 8 | buf[0];
     default: return (unsigned)0xa3a3;
     }
 }
@@ -575,7 +575,7 @@ struct PcapFile *pcapfile_openread(const char *capfilename)
      * speciality systems that hint at other features, such as a 64-bit
      * version of the file.
      */
-    switch (buf[0]<<24 | buf[1]<<16 | buf[2]<<8 | buf[3]) {
+    switch ((uint32_t)buf[0]<<24 | buf[1]<<16 | buf[2]<<8 | buf[3]) {
     case 0xa1b2c3d4:   byte_order = CAPFILE_BIGENDIAN; break;
     case 0xd4c3b2a1:   byte_order = CAPFILE_LITTLEENDIAN; break;
     default:
@@ -759,7 +759,7 @@ struct PcapFile *pcapfile_openappend(const char *capfilename, unsigned linktype)
 
 
     /* Find out the byte order */
-    switch (buf[0]<<24 | buf[1]<<16 | buf[2]<<8 | buf[3]) {
+    switch ((uint32_t)buf[0]<<24 | buf[1]<<16 | buf[2]<<8 | buf[3]) {
     case 0xa1b2c3d4:   byte_order = CAPFILE_BIGENDIAN; break;
     case 0xd4c3b2a1:   byte_order = CAPFILE_LITTLEENDIAN; break;
     default:
