@@ -1424,17 +1424,44 @@ udp_probe_catalog_selftest(void)
                 memcpy(changed, reply, length); changed[length] = '\r'; changed[length + 1] = '\n';
                 if (udp_probe_classify(port, changed, length + 2, cookie) != PROTO_HIFLY) return 1;
             } else {
-                static const unsigned offsets[] = {11, 15, 33, 47, 69, 75};
+                static const unsigned offsets[] = {11, 15, 49, 59, 69, 75};
                 for (n = 0; n < sizeof(offsets) / sizeof(*offsets); n++) {
                     memcpy(changed, reply, length); changed[offsets[n]] = '!';
                     if (udp_probe_classify(port, changed, length, cookie) != PROTO_NONE) return 1;
                 }
+                memcpy(changed, reply, length); changed[33] = 1;
+                if (udp_probe_classify(port, changed, length, cookie) != PROTO_NONE) return 1;
                 memcpy(changed, reply, length);
                 memcpy(changed + length - 11, "02/29/2007", 10);
                 if (udp_probe_classify(port, changed, length, cookie) != PROTO_NONE) return 1;
                 changed[length - 2] = '8';
                 if (udp_probe_classify(port, changed, length, cookie) != PROTO_HID) return 1;
             }
+        }
+    }
+    {
+        static const struct { enum ApplicationProtocol expected; const char *reply; } cases[] = {
+            {PROTO_HID, "discovered;080;00-06-8E-12-34-56;NoEntry;192.0.2.1;2;EH400;2.3.1.603;04/23/2012;"},
+            {PROTO_HID, "discovered;079;00-06-8E-12-34-56;NoExit;192.0.2.1;1;EH400;2.3.1.603;04/23/2012;"},
+            {PROTO_HID, "discovered;090;00-06-8E-12-34-56;VertX_EVO_V2000;192.0.2.1;275;EH400;2.3.1.603;04/23/2012;"},
+            {PROTO_HID, "discovered;082;00-06-8E-12-34-56;EdgeEH400;192.0.2.1;0;EH400;2.3.1.603;04/23/2012;"},
+            {PROTO_NONE, "discovered;080;00-06-8E-12-34-56;NoEntry;192.0.2.1;A;EH400;2.3.1.603;04/23/2012;"},
+            {PROTO_NONE, "discovered;081;00-06-8E-12-34-56;NoEntry;192.0.2.1;-1;EH400;2.3.1.603;04/23/2012;"},
+            {PROTO_NONE, "discovered;082;00-06-8E-12-34-56;NoEntry;192.0.2.1;1.0;EH400;2.3.1.603;04/23/2012;"},
+            {PROTO_NONE, "discovered;079;00-06-8E-12-34-56;NoEntry;192.0.2.1;;EH400;2.3.1.603;04/23/2012;"},
+            {PROTO_NONE, "discovered;073;00-06-8E-12-34-56;;192.0.2.1;2;EH400;2.3.1.603;04/23/2012;"},
+            {PROTO_NONE, "discovered;083;00-06-8E-12-34-56;NoEntry;192.0.2.1;2;EH400;2.3.1.603;2018-05-03-11;"},
+        };
+        unsigned n, cut;
+        for (n = 0; n < sizeof(cases) / sizeof(*cases); n++) {
+            const unsigned char *reply = (const unsigned char *)cases[n].reply;
+            unsigned length = (unsigned)strlen(cases[n].reply);
+            if (udp_probe_classify(4070, reply, length, cookie) != cases[n].expected) {
+                fprintf(stderr, "hid: name or numeric field validation failed at %u\n", n); return 1;
+            }
+            for (cut = 0; cut < length; cut++)
+                if (udp_probe_classify(4070, reply, cut, cookie) != PROTO_NONE) return 1;
+            if (udp_probe_classify(4071, reply, length, cookie) != PROTO_NONE) return 1;
         }
     }
     {

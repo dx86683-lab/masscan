@@ -202,7 +202,7 @@ int
 hid_probe_classify(const unsigned char *data, unsigned length, uint64_t cookie)
 {
     const unsigned char *field[9];
-    unsigned size[9], count = 0, start = 0, i, declared, month, day, year, days;
+    unsigned size[9], count = 0, start = 0, i, declared, numeric, month, day, year, days;
     static const unsigned month_days[] = {31,28,31,30,31,30,31,31,30,31,30,31};
     (void)cookie;
     if (!length || length > 999 || data[length - 1] != ';') return 0;
@@ -213,8 +213,8 @@ hid_probe_classify(const unsigned char *data, unsigned length, uint64_t cookie)
     if (count != 9 || size[0] != 10 || memcmp(field[0], "discovered", 10) ||
         size[1] != 3 || !discovery_decimal(field[1], 3, &declared) || declared != length ||
         size[2] != 17 || !udp_discovery_mac_text(field[2], 17) ||
-        size[3] != 15 || memcmp(field[3], "VertXController", 15) ||
-        !udp_discovery_ipv4(field[4], size[4]) || size[5] != 1 || field[5][0] != '2' ||
+        !discovery_ascii(field[3], size[3]) ||
+        !udp_discovery_ipv4(field[4], size[4]) || !discovery_decimal(field[5], size[5], &numeric) ||
         !discovery_ascii(field[6], size[6]) || size[7] > 64 || size[8] != 10) return 0;
     for (i = 0; i < size[7]; i++) {
         unsigned c = field[7][i];
