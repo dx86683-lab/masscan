@@ -64,7 +64,7 @@ rstfilter_is_filter(struct ResetFilter *rf,
                     ipaddress dst_ip, unsigned dst_port)
 {
     uint64_t hash;
-    uint64_t input[5];
+    uint64_t input[5] = {0};
     uint64_t key[2];
     size_t index;
     unsigned char *p;

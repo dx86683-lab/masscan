@@ -141,6 +141,7 @@ clean:
 	rm -f tmp/extended/*.o
 	rm -f bin/masscan
 	rm -f bin/receive-recording-test
+	rm -f bin/rstfilter-input-test
 
 regress: bin/masscan
 	bin/masscan --selftest
@@ -153,6 +154,13 @@ bin/receive-recording-test: tests/receive-recording.c src/main.c $(OBJ) FORCE
 test-receive: bin/receive-recording-test
 	@receive_test_dir=$$(mktemp -d) || exit 1; trap 'rm -rf "$$receive_test_dir"' EXIT; \
 	bin/receive-recording-test "$$receive_test_dir/received.pcap" "$$receive_test_dir/trace.txt"
+
+# Requires a compiler supporting pattern initialization (GCC 12+) and GNU ld --wrap.
+bin/rstfilter-input-test: tests/rstfilter-input.c src/misc-rstfilter.c src/crypto-siphash24.c src/util-malloc.c src/*.h FORCE
+	$(CC) $(CFLAGS) -ftrivial-auto-var-init=pattern -Isrc -o $@ tests/rstfilter-input.c src/misc-rstfilter.c src/crypto-siphash24.c src/util-malloc.c $(LDFLAGS) -Wl,--wrap=siphash24
+
+test-rstfilter: bin/rstfilter-input-test
+	bin/rstfilter-input-test
 
 install: bin/masscan
 	install $(INSTALL_DATA) bin/masscan $(DESTDIR)$(BINDIR)/masscan
