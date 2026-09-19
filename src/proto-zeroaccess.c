@@ -12,6 +12,8 @@
 #include "output.h"
 #include "proto-banner1.h"
 #include "util-safefunc.h"
+#include "masscan.h"
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -180,14 +182,14 @@ handle_zeroaccess(  struct Output *out, time_t timestamp,
     unsigned port_me = parsed->port_dst;
     struct BannerOutput banout[1];
 
-    banout->length = 0;
-    banout->next = 0;
-    banout->protocol = PROTO_UDP_ZEROACCESS;
-
     UNUSEDPARM(entropy);
-    UNUSEDPARM(px);
-    UNUSEDPARM(length);
     UNUSEDPARM(port_me);
+
+    if (parsed->app_offset > length ||
+        parsed->app_length > length - parsed->app_offset ||
+        parsed->app_length < 16 || parsed->app_length > sizeof(buf) ||
+        (parsed->app_length & 3) != 0)
+        return 0;
 
     /* Decrypt the response packet */
     buf[0] = '\0';
@@ -214,9 +216,6 @@ handle_zeroaccess(  struct Output *out, time_t timestamp,
     if (len < 16 || memcmp(buf+4, "Lter", 4) != 0)
         return 0; /* not "retL" */
 
-    /* List IP addresses */
-    banout_append(banout, PROTO_UDP_ZEROACCESS, "ZeroAccess:", 11);
-
     {
         unsigned i;
         unsigned ip_count = buf[12] | buf[13]<<8 | buf[14]<<16 | (uint32_t)buf[15]<<24;
@@ -224,6 +223,8 @@ handle_zeroaccess(  struct Output *out, time_t timestamp,
             return 0; /* too many addresses */
         if (16 + ip_count*8 > len)
             return 0; /* packet overflow */
+        banout_init(banout);
+        banout_append(banout, PROTO_UDP_ZEROACCESS, "ZeroAccess:", 11);
         for (i=0; i<ip_count; i++) {
             unsigned ip_found;
             char szaddr[20];
@@ -254,6 +255,7 @@ handle_zeroaccess(  struct Output *out, time_t timestamp,
             parsed->ip_ttl,
             banout_string(banout, PROTO_UDP_ZEROACCESS),
             banout_string_length(banout, PROTO_UDP_ZEROACCESS));
+    banout_release(banout);
 
     return 0; /* is zeroaccess botnet*/
 }
@@ -274,6 +276,145 @@ static const struct {
     {{0xda, 0xbe, 0x6e, 0xce, 0x28, 0x94, 0x8d, 0xab,
       0xc9, 0xc0, 0xd1, 0x99, 0xec, 0xd6, 0xa9, 0x3c}, 0x7f570a0f, 0xa81acee8U}
 };
+
+static int
+zeroaccess_response_selftest(void)
+{
+    static const struct {
+        unsigned char encrypted[176];
+        unsigned length;
+        const char *expected;
+    } cases[] = {
+        /* retL CRC high bytes 0x7f, 0x80 and 0xff, with one IPv4 entry. */
+        {{0x77, 0x2d, 0x7f, 0x19, 0x28, 0x94, 0x8d, 0xbe,
+          0xc9, 0xc0, 0xd1, 0x99, 0x92, 0x81, 0xa3, 0x33,
+          0x59, 0x03, 0x45, 0x66, 0xbc, 0x06, 0x8e, 0xce}, 24,
+         "banner udp 16464 192.0.2.1 1 zeroaccess ZeroAccess:127.0.2.1 \n"},
+        {{0xdd, 0x8b, 0x8c, 0xe6, 0x28, 0x94, 0x8d, 0xbe,
+          0xc9, 0xc0, 0xd1, 0x99, 0x92, 0x81, 0xa3, 0x33,
+          0xa6, 0x03, 0x45, 0x66, 0xef, 0x06, 0x8e, 0xce}, 24,
+         "banner udp 16464 192.0.2.1 1 zeroaccess ZeroAccess:128.0.2.1 \n"},
+        {{0x54, 0x6f, 0xc7, 0x99, 0x28, 0x94, 0x8d, 0xbe,
+          0xc9, 0xc0, 0xd1, 0x99, 0x92, 0x81, 0xa3, 0x33,
+          0xd9, 0x03, 0x45, 0x66, 0xcd, 0x06, 0x8e, 0xce}, 24,
+         "banner udp 16464 192.0.2.1 1 zeroaccess ZeroAccess:255.0.2.1 \n"},
+        /* CRC-valid counts 0x7f000000, 0x80000000 and 0xff000000. */
+        {{0xad, 0xa8, 0x7c, 0xd8, 0x28, 0x94, 0x8d, 0xbe,
+          0xc9, 0xc0, 0xd1, 0x99, 0x93, 0x81, 0xa3, 0x4c}, 16, ""},
+        {{0x20, 0x47, 0x7e, 0xf5, 0x28, 0x94, 0x8d, 0xbe,
+          0xc9, 0xc0, 0xd1, 0x99, 0x93, 0x81, 0xa3, 0xb3}, 16, ""},
+        {{0x8d, 0x2b, 0xc4, 0x35, 0x28, 0x94, 0x8d, 0xbe,
+          0xc9, 0xc0, 0xd1, 0x99, 0x93, 0x81, 0xa3, 0xcc}, 16, ""},
+        /* The count requires an eight-byte entry, but only four remain. */
+        {{0x78, 0xbd, 0xc9, 0xda, 0x28, 0x94, 0x8d, 0xbe,
+          0xc9, 0xc0, 0xd1, 0x99, 0x92, 0x81, 0xa3, 0x33,
+          0xa6, 0x03, 0x45, 0x66}, 20, ""},
+        /* A valid getL request is unrelated to a retL response. */
+        {{0xda, 0xbe, 0x6e, 0xce, 0x28, 0x94, 0x8d, 0xab,
+          0xc9, 0xc0, 0xd1, 0x99, 0xec, 0xd6, 0xa9, 0x3c}, 16, ""},
+        /* A valid response expands the banner beyond its inline storage. */
+        {{0x9c, 0x24, 0x04, 0xf3, 0x28, 0x94, 0x8d, 0xbe,
+          0xc9, 0xc0, 0xd1, 0x99, 0x87, 0x81, 0xa3, 0x33,
+          0xe6, 0x03, 0x45, 0x66, 0x4c, 0x06, 0x8e, 0xce,
+          0x59, 0x0c, 0x1e, 0x9c, 0x33, 0x19, 0x38, 0x3a,
+          0xa6, 0x32, 0x72, 0x75, 0xcc, 0x64, 0xe0, 0xe8,
+          0x59, 0xc9, 0xc2, 0xd0, 0x33, 0x93, 0x81, 0xa3,
+          0xa7, 0x26, 0x01, 0x46, 0xce, 0x4c, 0x06, 0x8e,
+          0x5d, 0x99, 0x0e, 0x1d, 0x3a, 0x33, 0x19, 0x38,
+          0xb4, 0x66, 0x30, 0x71, 0xe8, 0xcc, 0x64, 0xe0,
+          0x11, 0x99, 0xcb, 0xc1, 0xa3, 0x33, 0x93, 0x81,
+          0x87, 0x67, 0x24, 0x02, 0x8e, 0xce, 0x4c, 0x06,
+          0xdc, 0x9d, 0x9b, 0x0d, 0x38, 0x3a, 0x33, 0x19,
+          0xb0, 0x74, 0x64, 0x33, 0xe0, 0xe8, 0xcc, 0x64,
+          0x00, 0xd1, 0x9b, 0xc8, 0x81, 0xa3, 0x33, 0x93,
+          0xc3, 0x47, 0x65, 0x27, 0x06, 0x8e, 0xce, 0x4c,
+          0xcc, 0x1c, 0x9f, 0x98, 0x19, 0x38, 0x3a, 0x33,
+          0xf2, 0x70, 0x76, 0x67, 0x64, 0xe0, 0xe8, 0xcc,
+          0x09, 0xc0, 0xd3, 0x98, 0x93, 0x81, 0xa3, 0x33,
+          0xe6, 0x03, 0x45, 0x66, 0x4c, 0x06, 0x8e, 0xce,
+          0x59, 0x0c, 0x1e, 0x9c, 0x33, 0x19, 0x38, 0x3a,
+          0xa6, 0x32, 0x72, 0x75, 0xcc, 0x64, 0xe0, 0xe8,
+          0x59, 0xc9, 0xc2, 0xd0, 0x33, 0x93, 0x81, 0xa3}, 176,
+         "banner udp 16464 192.0.2.1 1 zeroaccess ZeroAccess:"
+         "192.0.2.1 192.0.2.1 192.0.2.1 192.0.2.1 192.0.2.1 "
+         "192.0.2.1 192.0.2.1 192.0.2.1 192.0.2.1 192.0.2.1 "
+         "192.0.2.1 192.0.2.1 192.0.2.1 192.0.2.1 192.0.2.1 "
+         "192.0.2.1 192.0.2.1 192.0.2.1 192.0.2.1 192.0.2.1 "
+         "\n"}
+    };
+    unsigned i;
+
+    /* Captured input must bound every word read by the decoder. */
+    for (i = 0; i < 21; i++) {
+        struct PreprocessedInfo parsed = {0};
+        unsigned char *packet = calloc(3 + i, 1);
+        if (packet == NULL)
+            return 1;
+        parsed.app_offset = 3;
+        parsed.app_length = i;
+        handle_zeroaccess(NULL, 0, packet, 3 + i, &parsed, 0);
+        free(packet);
+    }
+    {
+        struct PreprocessedInfo parsed = {0};
+        unsigned char packet[27] = {0};
+        unsigned char *oversized = calloc(2052, 1);
+        if (oversized == NULL)
+            return 1;
+        parsed.app_length = 2052;
+        handle_zeroaccess(NULL, 0, oversized, 2052, &parsed, 0);
+        free(oversized);
+        parsed.app_offset = sizeof(packet) + 1;
+        parsed.app_length = 16;
+        handle_zeroaccess(NULL, 0, packet, sizeof(packet), &parsed, 0);
+        parsed.app_offset = 3;
+        parsed.app_length = 24;
+        memcpy(packet + 3, cases[0].encrypted, 24);
+        handle_zeroaccess(NULL, 0, packet, sizeof(packet) - 1, &parsed, 0);
+    }
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        struct Output out;
+        struct PreprocessedInfo parsed;
+        unsigned char packet[179] = {0};
+        char actual[512];
+        size_t count;
+        int failed;
+
+        memset(&out, 0, sizeof(out));
+        memset(&parsed, 0, sizeof(parsed));
+        out.fp = tmpfile();
+        if (out.fp == NULL)
+            return 1;
+        out.funcs = &text_output;
+        out.format = Output_List;
+        out.is_banner = 1;
+        out.rotate.next = LONG_MAX;
+        parsed.src_ip.version = 4;
+        parsed.src_ip.ipv4 = 0xc0000201U;
+        parsed.port_src = 16464;
+        parsed.app_offset = 3;
+        parsed.app_length = cases[i].length;
+        memcpy(packet + parsed.app_offset, cases[i].encrypted, cases[i].length);
+
+        /* Corrupt CRCs must produce no output before the valid fixture. */
+        packet[parsed.app_offset] ^= 1;
+        handle_zeroaccess(&out, 1, packet, 3 + cases[i].length, &parsed, 0);
+        failed = ftell(out.fp) != 0;
+        packet[parsed.app_offset] ^= 1;
+        handle_zeroaccess(&out, 1, packet, 3 + cases[i].length, &parsed, 0);
+        rewind(out.fp);
+        count = fread(actual, 1, sizeof(actual) - 1, out.fp);
+        actual[count] = '\0';
+        failed |= strcmp(actual, cases[i].expected) != 0;
+        fclose(out.fp);
+        if (failed) {
+            fprintf(stderr, "zeroaccess: response case %u failed\n", i);
+            return 1;
+        }
+    }
+    return 0;
+}
 
 
 /***************************************************************************
@@ -316,5 +457,5 @@ zeroaccess_selftest(void)
             printf("0x%02x, ", buf[i]);
     }*/
 
-    return 0; /*success*/
+    return zeroaccess_response_selftest();
 }
