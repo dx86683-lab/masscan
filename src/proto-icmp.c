@@ -6,6 +6,8 @@
 #include "masscan-status.h"
 #include "massip-port.h"
 #include "main-dedup.h"
+#include <stdlib.h>
+#include <string.h>
 
 
 /***************************************************************************
@@ -30,17 +32,17 @@ parse_port_unreachable(const unsigned char *px, unsigned length,
         unsigned *r_port_me, unsigned *r_port_them,
         unsigned *r_ip_proto)
 {
+    unsigned header_length;
     if (length < 24)
         return -1;
-    *r_ip_me = px[12]<<24 | px[13]<<16 | px[14]<<8 | px[15];
-    *r_ip_them = px[16]<<24 | px[17]<<16 | px[18]<<8 | px[19];
+    header_length = (px[0] & 0xF) << 2;
+    if (header_length < 20 || header_length > length - 4)
+        return -1;
+    *r_ip_me = (unsigned)px[12]<<24 | px[13]<<16 | px[14]<<8 | px[15];
+    *r_ip_them = (unsigned)px[16]<<24 | px[17]<<16 | px[18]<<8 | px[19];
     *r_ip_proto = px[9]; /* TCP=6, UDP=17 */
 
-    length -= (px[0]&0xF)<<2;
-    px += (px[0]&0xF)<<2;
-
-    if (length < 4)
-        return -1;
+    px += header_length;
 
     *r_port_me = px[0]<<8 | px[1];
     *r_port_them = px[2]<<8 | px[3];
@@ -76,7 +78,7 @@ icmp_selftest(void)
     static const unsigned char blob[] = {
         0x45, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x00,
         0x40, 0x11, 0x00, 0x00,
-        0x0a, 0x00, 0x00, 0x01, /* src = 10.0.0.1  */
+        0xc6, 0x33, 0x64, 0x02, /* src = 198.51.100.2 */
         0xc0, 0x00, 0x02, 0x01, /* dst = 192.0.2.1 */
         0x06, 0x40,             /* src port = 1600  */
         0x00, 0x35,             /* dst port = 53    */
@@ -85,8 +87,46 @@ icmp_selftest(void)
                                  &ip_me, &ip_them, &port_me, &port_them,
                                  &ip_proto);
     if (err != 0)          return 1;
+    if (ip_me != 0xc6336402U || ip_them != 0xc0000201U || ip_proto != 17) return 1;
     if (port_me   != 1600) return 1;
     if (port_them != 53)   return 1;
+    {
+        struct PreprocessedInfo parsed;
+        unsigned size;
+        memset(&parsed, 0, sizeof(parsed));
+        for (size = 0; size < 8; size++) {
+            unsigned char *short_icmp = calloc(size ? size : 1, 1);
+            if (short_icmp == NULL)
+                return 1;
+            handle_icmp(NULL, 0, short_icmp, size, &parsed, 0);
+            free(short_icmp);
+        }
+        parsed.transport_offset = sizeof(blob) + 1;
+        handle_icmp(NULL, 0, blob, sizeof(blob), &parsed, 0);
+    }
+    {
+        unsigned char options[sizeof(blob) + 4] = {0};
+        unsigned char malformed[sizeof(blob)];
+        unsigned ihl;
+        memcpy(options, blob, 20);
+        memcpy(options + 24, blob + 20, 4);
+        options[0] = 0x46;
+        options[3] = 0x20;
+        if (parse_port_unreachable(options, sizeof(options),
+                                   &ip_me, &ip_them, &port_me, &port_them,
+                                   &ip_proto) != 0 || port_me != 1600 || port_them != 53)
+            return 1;
+        for (ihl = 0; ihl < 16; ihl++) {
+            if (ihl == 5)
+                continue;
+            memcpy(malformed, blob, sizeof(blob));
+            malformed[0] = (unsigned char)(0x40 | ihl);
+            if (parse_port_unreachable(malformed, sizeof(malformed),
+                                      &ip_me, &ip_them, &port_me, &port_them,
+                                      &ip_proto) != -1)
+                return 1;
+        }
+    }
     return 0;
 }
 
@@ -106,11 +146,14 @@ handle_icmp(struct Output *out, time_t timestamp,
     /* dedup ICMP echo replies as well as SYN/ACK replies */
     static struct DedupTable *echo_reply_dedup = NULL;
 
+    if (parsed->transport_offset > length ||
+        length - parsed->transport_offset < 8)
+        return;
 
     if (!echo_reply_dedup)
         echo_reply_dedup = dedup_create();
 
-    seqno_me = px[parsed->transport_offset+4]<<24
+    seqno_me = (unsigned)px[parsed->transport_offset+4]<<24
                 | px[parsed->transport_offset+5]<<16
                 | px[parsed->transport_offset+6]<<8
                 | px[parsed->transport_offset+7]<<0;
@@ -224,4 +267,3 @@ handle_icmp(struct Output *out, time_t timestamp,
     }
 
 }
-
