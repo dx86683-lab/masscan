@@ -113,11 +113,10 @@ ikev2_probe_classify(const unsigned char *data, unsigned length, uint64_t cookie
     unsigned char spi[32];
     const unsigned char *peer = NULL;
     unsigned offset = 28, next, seen = 0, i, nonzero = 0;
-    if (length < 28 || length > 4096 || data[17] != 0x20 || data[18] != 34 ||
+    if (length < 28 || length > 4096 || (data[17] & 0xf0) != 0x20 || data[18] != 34 ||
         (data[19] & 0x28) != 0x20 || ikev2_u32(data + 20) || ikev2_u32(data + 24) != length ||
         !udp_probe_derive("ikev2-spi", cookie, spi) || memcmp(data, spi, 8)) return 0;
     for (i = 8; i < 16; i++) nonzero |= data[i];
-    if (!nonzero) return 0;
     next = data[16];
     while (next) {
         unsigned size, bit = 0;
@@ -136,9 +135,13 @@ ikev2_probe_classify(const unsigned char *data, unsigned length, uint64_t cookie
             if (size < 20 || size > 260) return 0;
         } else if (next == 41) {
             unsigned type;
-            if (size != 28 || data[offset + 4] || data[offset + 5]) return 0;
+            if (size < 8 || data[offset + 5]) return 0;
+            /* RFC7296 3.10: Protocol ID is ignored when SPI Size is zero. */
             type = ikev2_u16(data + offset + 6);
-            if (type != 16388 && type != 16389) return 0;
+            if (type == 7 || type == 14) {
+                if (size != 8) return 0;
+                bit = 8;
+            } else if (size != 28 || (type != 16388 && type != 16389)) return 0;
         } else if (next == 43) {
             if (size < 5) return 0;
         } else if ((next >= 33 && next <= 48) || (data[offset + 1] & 0x80)) return 0;
@@ -147,6 +150,10 @@ ikev2_probe_classify(const unsigned char *data, unsigned length, uint64_t cookie
         next = data[offset];
         offset += size;
     }
-    return seen == 7 && offset == length && ikev2_peer_valid(cookie, peer);
+    if (offset != length) return 0;
+    /* A correlated rejection identifies IKE, but does not establish an SA.
+     * RFC7296 2.6 allows a zero responder SPI before an SA is created. */
+    if (seen == 8) return 1;
+    return seen == 7 && nonzero && ikev2_peer_valid(cookie, peer);
 }
 #endif

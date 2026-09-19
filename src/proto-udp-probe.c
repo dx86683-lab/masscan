@@ -2177,6 +2177,59 @@ udp_probe_catalog_selftest(void)
             memcpy(changed + 60, reply + 52, 8);
             if (udp_probe_classify(500, changed, 152, cookie) != PROTO_IKEV2) return 1;
         }
+        {
+            unsigned char notify[36] = {0}, changed[180];
+            static const unsigned types[] = {7, 14};
+            static const unsigned offsets[] = {0, 7, 16, 17, 18, 19, 20, 24, 27, 28, 30, 31, 33, 34, 35};
+            unsigned n, t;
+            memcpy(notify, result.payload, 8);
+            memcpy(notify + 16, "\x29\x20\x22\x20\x00\x00\x00\x00\x00\x00\x00\x24", 12);
+            memcpy(notify + 28, "\x00\x00\x00\x08\x00\x00\x00\x0e", 8);
+            for (t = 0; t < sizeof(types) / sizeof(types[0]); t++) {
+                notify[35] = (unsigned char)types[t];
+                if (udp_probe_classify(500, notify, sizeof(notify), cookie) != PROTO_IKEV2) {
+                    fprintf(stderr, "ikev2: correlated Notify %u rejected\n", types[t]); return 1;
+                }
+                if (udp_probe_classify(500, notify, sizeof(notify), cookie ^ 1) != PROTO_NONE) return 1;
+                for (n = 0; n < sizeof(notify); n++)
+                    if (udp_probe_classify(500, notify, n, cookie) != PROTO_NONE) return 1;
+                for (n = 0; n < sizeof(offsets) / sizeof(offsets[0]); n++) {
+                    memcpy(changed, notify, sizeof(notify)); changed[offsets[n]] ^= 0x10;
+                    /* Changing only the Version flag is allowed; setting I is not. */
+                    if (offsets[n] == 19) changed[19] |= 8;
+                    if (udp_probe_classify(500, changed, sizeof(notify), cookie) != PROTO_NONE) return 1;
+                }
+                memcpy(changed, notify, sizeof(notify)); changed[8] = 0x91;
+                if (udp_probe_classify(500, changed, sizeof(notify), cookie) != PROTO_IKEV2) return 1;
+                /* RFC7296 3.10 ignores Protocol ID when SPI Size is zero. */
+                changed[32] = 1;
+                if (udp_probe_classify(500, changed, sizeof(notify), cookie) != PROTO_IKEV2) return 1;
+                changed[19] = 0;
+                if (udp_probe_classify(500, changed, sizeof(notify), cookie) != PROTO_NONE) return 1;
+                memcpy(changed, notify, sizeof(notify)); changed[17] = 0x2f; changed[19] |= 0xd7;
+                if (udp_probe_classify(500, changed, sizeof(notify), cookie) != PROTO_IKEV2) return 1;
+                changed[27] = 37; changed[31] = 9; changed[36] = 0;
+                if (udp_probe_classify(500, changed, 37, cookie) != PROTO_NONE) return 1;
+                memcpy(changed, notify, sizeof(notify)); changed[27] = 44; changed[28] = 41;
+                memcpy(changed + 36, notify + 28, 8);
+                if (udp_probe_classify(500, changed, 44, cookie) != PROTO_NONE) return 1;
+                memcpy(changed, reply, 152); changed[116] = 41; changed[27] = 160;
+                memcpy(changed + 152, notify + 28, 8);
+                if (udp_probe_classify(500, changed, 160, cookie) != PROTO_NONE) return 1;
+            }
+            memcpy(changed, reply, 152); changed[17] = 0x2f;
+            if (udp_probe_classify(500, changed, 152, cookie) != PROTO_IKEV2) {
+                fprintf(stderr, "ikev2: compatible minor version rejected\n"); return 1;
+            }
+            memset(changed + 8, 0, 8);
+            if (udp_probe_classify(500, changed, 152, cookie) != PROTO_NONE) return 1;
+            memcpy(changed, reply, 152); changed[116] = 41; changed[27] = 180;
+            memset(changed + 152, 0, 28); changed[155] = 28;
+            changed[156] = 1; changed[158] = 0x40; changed[159] = 4;
+            if (udp_probe_classify(500, changed, 180, cookie) != PROTO_IKEV2) {
+                fprintf(stderr, "ikev2: empty-SPI notification Protocol ID rejected\n"); return 1;
+            }
+        }
     }
     {
         unsigned char reply[128] = {0};
