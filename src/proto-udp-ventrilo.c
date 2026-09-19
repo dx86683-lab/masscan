@@ -48,7 +48,8 @@ ventrilo_probe_classify(const unsigned char *data, unsigned length, uint64_t coo
     for (i = 0; i < 18; i++)
         header[2 + i] = (unsigned char)(data[2 + i] - VENTRILO_HEADER_TABLE[(data[0] + i * data[1]) & 255] - i % 5);
     size = ventrilo_u16(header + 10); key = ventrilo_u16(header + 16);
-    if (ventrilo_u16(header + 2) || ventrilo_u16(header + 4) != 2 ||
+    /* Detailed-status requests use command 2; status replies carry 3. */
+    if (ventrilo_u16(header + 2) || ventrilo_u16(header + 4) != 3 ||
         ventrilo_u16(header + 6) != (cookie & 0xffff) ||
         !size || size > sizeof(body) || size + 20 != length ||
         ventrilo_u16(header + 8) != size || ventrilo_u16(header + 12) != 1 ||

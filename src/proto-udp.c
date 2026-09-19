@@ -505,7 +505,7 @@ proto_udp_selftest(void)
             {30311, 44, PROTO_GARDASOFT, "Gardasoft,PP420,000001,000B75000001,C0000201"},
             {30313, 19, PROTO_GARDASOFT_VERSION, "PP420 (HW001) V002>"},
             {3784, 45, PROTO_VENTRILO,
-                "\x45\x01\xaf\x24\xde\x6a\xf5\xd9\x66\xf8\x80\x11\x3c\x4e\x97\xc0\xf0\x66\x81\xa1"
+                "\x45\x01\xaf\x24\xde\x6b\xf5\xd9\x66\xf8\x80\x11\x3c\x4e\x97\xc0\xf0\x66\x81\xa1"
                 "\xd9\xc1\xb7\xd8\x1e\x69\x5b\x81\xa5\xa1\xbf\x12\xe0\x98\x7a\xcb\x39\xad\x7b\x98\xb0\x66\x23\x9b\x8e"},
             {626, sizeof(serial_reply), PROTO_SERIALNUMBERD, serial_reply},
             {8888, 7, PROTO_ANDROMOUSE, "GOTBACK"},
