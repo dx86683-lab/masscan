@@ -2489,6 +2489,16 @@ udp_probe_catalog_selftest(void)
                 {"SERVER:", "SERVER: Test/1 UPnP/2.0 Product/1\r\nBOOTID.UPNP.ORG: 1", 1},
                 {"SERVER:", "SERVER: Test/1 UPnP/1.1 Product/1\r\nBOOTID.UPNP.ORG: 0", 1},
                 {"SERVER:", "SERVER: Test/1 UPnP/2.0 Product/1\r\nBOOTID.UPNP.ORG: 2147483648", 0},
+                {"SERVER:", "SERVER: Test/1 UPnP/1.0 Product/1 Library/2", 1},
+                {"SERVER:", "SERVER: Test/1\tUPnP/1.0\tProduct/1", 1},
+                {"SERVER:", "SERVER: Test/1 UPnP/1.0 Product/1 (device (release)) Library", 1},
+                {"SERVER:", "SERVER: Test/1 UPnP/1.0 Product/1 (escaped\\)comment)", 1},
+                {"SERVER:", "SERVER: Test/1 UPnP/1.0 Product/1 (unfinished", 0},
+                {"SERVER:", "SERVER: Test/1 UPnP/1.0 Product/1 Library/", 0},
+                {"SERVER:", "SERVER: Test/1 UPnP/1.0 Product/1 Library/2/3", 0},
+                {"SERVER:", "SERVER: Test/1 UPnP/1.0 Product/1;extension", 0},
+                {"SERVER:", "SERVER: Test UPnP/1.0 Product/1", 0},
+                {"SERVER:", "SERVER: Test/1 UPnP/1.0 Product", 0},
                 {"ST:", "ST: ssdp:all", 0},
                 {"ST:", "ST: upnp:rootdevice\r\nST: upnp:rootdevice", 0},
                 {"ST:", "ST: upnp:rootdevice\r\nX-Extension: yes", 1},
@@ -2519,7 +2529,10 @@ udp_probe_catalog_selftest(void)
                 memcpy(altered + prefix, cases[i].line, replacement);
                 memcpy(altered + prefix + replacement, end, suffix);
                 if ((udp_probe_classify(1900, altered, prefix + replacement + suffix, cookie) == PROTO_SSDP)
-                    != cases[i].valid) return 1;
+                    != cases[i].valid) {
+                    fprintf(stderr, "ssdp: header validation case %u failed\n", i);
+                    return 1;
+                }
             }
             memcpy(altered, reply, sizeof(reply) - 1);
             altered[15] = '\n';

@@ -126,25 +126,66 @@ cache_age(char *value)
 }
 
 static int
-server_version(char *value)
+server_token(unsigned ch)
 {
-    char *upnp, *product, *slash, *p;
-    upnp = strchr(value, ' ');
-    if (!upnp) return 0;
-    *upnp++ = 0;
-    upnp = trim_space(upnp);
-    slash = strchr(value, '/');
-    if (!slash || slash == value || !slash[1]) return 0;
-    product = strchr(upnp, ' ');
-    if (!product) return 0;
-    *product++ = 0;
-    product = trim_space(product);
-    slash = strchr(product, '/');
-    if (!slash || slash == product || !slash[1]) return 0;
-    for (p = product; *p; p++) if (*p == ' ' || *p == '\t') return 0;
-    if (!strcmp(upnp, "UPnP/1.0")) return 1;
-    if (!strcmp(upnp, "UPnP/1.1") || !strcmp(upnp, "UPnP/2.0")) return 2;
-    return 0;
+    return ch > 32 && ch < 127 && !strchr("()<>@,;:\\\"/[]?={}", ch);
+}
+
+static int
+server_product(const char **cursor, int require_version)
+{
+    const char *p = *cursor, *start = p;
+    while (server_token((unsigned char)*p)) p++;
+    if (p == start) return 0;
+    if (*p == '/') {
+        start = ++p;
+        while (server_token((unsigned char)*p)) p++;
+        if (p == start) return 0;
+    } else if (require_version) return 0;
+    *cursor = p;
+    return 1;
+}
+
+static int
+server_version(const char *value)
+{
+    const char *p = value;
+    unsigned i;
+    int version = 0;
+    /* UDA requires three leading products; HTTP allows further products/comments. */
+    for (i = 0; i < 3; i++) {
+        const char *start = p;
+        if (!server_product(&p, 1)) return 0;
+        if (i == 1) {
+            if (p - start != 8) return 0;
+            if (!memcmp(start, "UPnP/1.0", 8)) version = 1;
+            else if (!memcmp(start, "UPnP/1.1", 8) || !memcmp(start, "UPnP/2.0", 8)) version = 2;
+            else return 0;
+        }
+        if (i < 2) {
+            if (*p != ' ' && *p != '\t') return 0;
+            while (*p == ' ' || *p == '\t') p++;
+        }
+    }
+    while (*p) {
+        if (*p != ' ' && *p != '\t') return 0;
+        while (*p == ' ' || *p == '\t') p++;
+        if (!*p) break;
+        if (*p == '(') {
+            unsigned depth = 1;
+            p++;
+            while (*p && depth) {
+                unsigned ch = (unsigned char)*p++;
+                if (ch == '\\') {
+                    if (!*p || (unsigned char)*p >= 127) return 0;
+                    p++;
+                } else if (ch == '(') depth++;
+                else if (ch == ')') depth--;
+            }
+            if (depth) return 0;
+        } else if (!server_product(&p, 0)) return 0;
+    }
+    return version;
 }
 
 static int
